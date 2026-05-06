@@ -40,6 +40,7 @@ export async function CouponTable({ rows }: { rows: Coupon[] }) {
 
   return (
     <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
@@ -97,6 +98,7 @@ export async function CouponTable({ rows }: { rows: Coupon[] }) {
           ))}
         </TableBody>
       </Table>
+      </div>
     </Card>
   );
 }
