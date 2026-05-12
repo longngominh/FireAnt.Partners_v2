@@ -11,7 +11,6 @@ import {
   TicketIcon,
   UsersIcon,
   ShieldIcon,
-  BarChart3Icon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,8 +37,8 @@ const partnerNav: NavItem[] = [
 ];
 
 const adminNav: NavItem[] = [
+  { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
   { href: "/admin/partners", label: "Quản lý đối tác", icon: ShieldIcon },
-  { href: "/admin/partners?tab=performance", label: "Hiệu suất", icon: BarChart3Icon },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean): boolean {
