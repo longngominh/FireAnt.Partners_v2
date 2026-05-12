@@ -17,9 +17,9 @@ export async function togglePartnerActiveAction(
     const pool = await getPool();
     await pool
       .request()
-      .input("partnerId", sql.Int, partnerId)
-      .input("isActive", sql.Bit, isActive ? 1 : 0)
-      .query("UPDATE Partners SET IsActive = @isActive WHERE PartnerId = @partnerId");
+      .input("PartnerId", sql.Int, partnerId)
+      .input("IsActive",  sql.Bit, isActive ? 1 : 0)
+      .execute("usp_TogglePartnerActive");
 
     revalidatePath("/admin/partners");
     return { ok: true };

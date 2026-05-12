@@ -8,7 +8,7 @@ import { Pagination } from "@/components/shared/pagination";
 import { listCoupons } from "@/lib/data/payment";
 import type { CouponStatus } from "@/lib/data/payment";
 
-export const metadata = { title: "Coupon đã tạo" };
+export const metadata = { title: "Link thanh toán đã tạo" };
 
 type SearchParams = Promise<{
   q?: string;
@@ -39,9 +39,9 @@ export default async function PaymentListPage({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Coupon đã tạo</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Link thanh toán đã tạo</h1>
           <p className="text-sm text-muted-foreground">
-            Tổng {total} coupon. Bấm để xem QR và copy link nhanh.
+            Tổng {total} link. Bấm để xem QR và copy link nhanh.
           </p>
         </div>
         <Button asChild className="gap-2">

@@ -9,10 +9,8 @@ import {
   TicketIcon,
   UsersIcon,
   ShieldIcon,
-  BarChart3Icon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Separator } from "@/components/ui/separator";
 
 type NavItem = {
   href: string;
@@ -24,13 +22,13 @@ type NavItem = {
 const partnerNav: NavItem[] = [
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboardIcon, exact: true },
   { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
-  { href: "/payment", label: "Coupon đã tạo", icon: TicketIcon, exact: true },
+  { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
   { href: "/customers", label: "Khách hàng", icon: UsersIcon },
 ];
 
 const adminNav: NavItem[] = [
+  { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
   { href: "/admin/partners", label: "Quản lý đối tác", icon: ShieldIcon },
-  { href: "/admin/partners?tab=performance", label: "Hiệu suất", icon: BarChart3Icon },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean): boolean {
@@ -46,14 +44,19 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
     <Link
       href={item.href}
       className={cn(
-        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-3 rounded-md py-2 pr-3 pl-3 text-sm transition-all duration-150",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/80",
+          ? "border-l-2 border-sidebar-primary bg-sidebar-accent pl-[10px] font-semibold text-sidebar-accent-foreground"
+          : "font-medium text-sidebar-foreground/70",
       )}
     >
-      <Icon className={cn("size-4 shrink-0", active && "text-foreground")} />
+      <Icon
+        className={cn(
+          "size-4 shrink-0 transition-colors",
+          active ? "text-sidebar-primary" : "text-sidebar-foreground/50",
+        )}
+      />
       <span className="truncate">{item.label}</span>
     </Link>
   );
@@ -64,19 +67,20 @@ export function Sidebar({ role }: { role: string }) {
   const isAdmin = role === "admin";
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
-      <div className="flex h-14 items-center gap-2 border-b px-4">
-        <Image src="/logo.png" alt="FireAnt" width={28} height={28} className="rounded-md" />
+    <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
+      {/* Brand header */}
+      <div className="flex h-14 items-center gap-2.5 border-b px-4">
+        <Image src="/logo.png" alt="FireAnt" width={30} height={30} className="rounded-lg shadow-sm" />
         <div className="flex flex-col leading-none">
-          <span className="text-sm font-semibold">FireAnt</span>
-          <span className="text-xs text-muted-foreground">Partners</span>
+          <span className="text-sm font-bold tracking-tight">FireAnt</span>
+          <span className="text-[11px] font-medium text-sidebar-primary/70">Partners</span>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <nav className="flex-1 overflow-y-auto px-3 py-5">
         {!isAdmin && (
           <>
-            <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
               Đối tác
             </div>
             <div className="flex flex-col gap-0.5">
@@ -89,8 +93,7 @@ export function Sidebar({ role }: { role: string }) {
 
         {isAdmin && (
           <>
-            <Separator className="my-4" />
-            <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
               Quản trị
             </div>
             <div className="flex flex-col gap-0.5">
@@ -101,6 +104,15 @@ export function Sidebar({ role }: { role: string }) {
           </>
         )}
       </nav>
+
+      {/* Sidebar footer accent */}
+      <div className="border-t px-4 py-3">
+        <div className="rounded-md bg-sidebar-accent/60 px-3 py-2">
+          <p className="text-[10px] font-medium text-sidebar-foreground/50">
+            FireAnt Partners v2
+          </p>
+        </div>
+      </div>
     </aside>
   );
 }

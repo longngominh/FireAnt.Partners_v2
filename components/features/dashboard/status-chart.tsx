@@ -31,7 +31,7 @@ export function StatusChart({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Trạng thái coupon</CardTitle>
+        <CardTitle className="text-base">Trạng thái link thanh toán</CardTitle>
         <CardDescription>Phân bổ theo trạng thái thanh toán</CardDescription>
       </CardHeader>
       <CardContent>

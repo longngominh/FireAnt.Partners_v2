@@ -12,17 +12,18 @@ import {
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatVNDCompact } from "@/lib/utils/currency";
-import { getTrendSeries, type TrendRange, type TrendPoint } from "@/lib/data/trend";
+import type { TrendRange, TrendPoint } from "@/lib/data/trend";
 
 const RANGES: TrendRange[] = ["1W", "1M", "3M", "6M", "1Y", "2Y", "ALL"];
 
 type Props = {
   initialData: TrendPoint[];
   partnerId: string | number | null;
+  partnerIds?: number[];
 };
 
-export function TrendChart({ initialData, partnerId }: Props) {
-  const [range, setRange] = useState<TrendRange>("6M");
+export function TrendChart({ initialData, partnerId, partnerIds }: Props) {
+  const [range, setRange] = useState<TrendRange>("1M");
   const [data, setData] = useState<TrendPoint[]>(initialData);
   const [isPending, startTransition] = useTransition();
 
@@ -30,8 +31,17 @@ export function TrendChart({ initialData, partnerId }: Props) {
     if (newRange === range) return;
     setRange(newRange);
     startTransition(async () => {
-      const result = await getTrendSeries(partnerId, newRange);
-      setData(result);
+      const params = new URLSearchParams({ range: newRange });
+      if (partnerIds && partnerIds.length > 0) {
+        params.set("partnerIds", partnerIds.join(","));
+      } else if (partnerId !== null) {
+        params.set("partnerId", String(partnerId));
+      }
+      const res = await fetch(`/api/trend?${params}`);
+      if (res.ok) {
+        const result: TrendPoint[] = await res.json();
+        setData(result);
+      }
     });
   }
 

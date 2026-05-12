@@ -58,7 +58,7 @@ export default async function DashboardPage() {
           icon={<WalletIcon className="size-4" />}
         />
         <KpiTile
-          label="Coupon đã tạo (tổng)"
+          label="Link thanh toán đã tạo (tổng)"
           value={formatNumber(stats.couponsCreated)}
           hint={`Trong đó ${stats.allTimePaid} đã thanh toán`}
           icon={<TicketIcon className="size-4" />}

@@ -33,7 +33,7 @@ type NavItem = {
 const partnerNav: NavItem[] = [
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboardIcon, exact: true },
   { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
-  { href: "/payment", label: "Coupon đã tạo", icon: TicketIcon, exact: true },
+  { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
   { href: "/customers", label: "Khách hàng", icon: UsersIcon },
 ];
 
@@ -76,8 +76,8 @@ export function MobileNav({ role }: { role: string }) {
             </SheetTitle>
           </SheetHeader>
 
-          <nav className="flex-1 overflow-y-auto px-3 py-4">
-            <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <nav className="flex-1 overflow-y-auto px-3 py-5">
+            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
               {isAdmin ? "Quản trị" : "Đối tác"}
             </div>
             <div className="flex flex-col gap-0.5">
@@ -89,14 +89,14 @@ export function MobileNav({ role }: { role: string }) {
                     <Link
                       href={item.href}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                        "flex items-center gap-3 rounded-md py-2.5 pr-3 pl-3 text-sm transition-all duration-150",
                         "hover:bg-accent hover:text-accent-foreground",
                         active
-                          ? "bg-accent text-accent-foreground"
-                          : "text-foreground/80",
+                          ? "border-l-2 border-primary bg-accent pl-[10px] font-semibold text-accent-foreground"
+                          : "font-medium text-foreground/70",
                       )}
                     >
-                      <Icon className={cn("size-4 shrink-0", active && "text-foreground")} />
+                      <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-foreground/50")} />
                       <span>{item.label}</span>
                     </Link>
                   </SheetClose>

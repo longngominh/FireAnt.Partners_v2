@@ -22,9 +22,8 @@ export function CreatePartnerForm() {
           . Để cấp quyền cho đối tác mới, hãy thêm user vào bảng{" "}
           <code className="rounded bg-muted px-1 text-xs">Partners</code>{" "}
           trong DB và đảm bảo{" "}
-          <code className="rounded bg-muted px-1 text-xs">UserId</code> khớp
-          với <code className="rounded bg-muted px-1 text-xs">sub</code> trên
-          IS4.
+          <code className="rounded bg-muted px-1 text-xs">UserName</code> khớp
+          với username trên IS4.
         </p>
       </CardContent>
     </Card>

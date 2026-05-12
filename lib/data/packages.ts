@@ -8,7 +8,6 @@ export const SERVICE_NAMES: Record<number, string> = {
 
 export const SERVICE_IDS = [33, 34, 35] as const;
 
-// Map từng PackageID về nhóm dịch vụ tương ứng
 const PACKAGE_SERVICE_MAP: Record<number, { serviceId: number; serviceName: string }> = {
   55: { serviceId: 33, serviceName: "Thiết yếu" },
   43: { serviceId: 33, serviceName: "Thiết yếu" },
@@ -23,8 +22,6 @@ const PACKAGE_SERVICE_MAP: Record<number, { serviceId: number; serviceName: stri
   50: { serviceId: 35, serviceName: "Cao cấp" },
   51: { serviceId: 35, serviceName: "Cao cấp" },
 };
-
-const ALLOWED_PACKAGE_IDS = [55, 43, 44, 45, 95, 96, 97, 98, 57, 49, 50, 51];
 
 export type ServicePackage = {
   packageId: number;
@@ -45,14 +42,7 @@ type PackageRow = {
 export async function listPackages(): Promise<ServicePackage[]> {
   try {
     const pool = await getPool();
-    const inClause = ALLOWED_PACKAGE_IDS.join(", ");
-    const res = await pool.request().query<PackageRow>(`
-      SELECT PackageID, Months, Amount, PackageName
-      FROM [EStocks_Data].[dbo].[service_Packages]
-      WHERE PackageID IN (${inClause})
-        AND IsTrial = 0
-      ORDER BY PackageID
-    `);
+    const res = await pool.request().execute<PackageRow>("usp_ListPackages");
     return res.recordset.map((r) => {
       const group = PACKAGE_SERVICE_MAP[r.PackageID];
       return {

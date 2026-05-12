@@ -52,134 +52,69 @@ export async function getDashboardStats(
           : partnerId
         : null;
 
-    const isFiltered = numPartnerId !== null && !isNaN(numPartnerId);
-    const partnerClause = isFiltered ? "cp.PartnerId = @partnerId" : "1=1";
+    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
 
     const pool = await getPool();
     const { start: monthStart, end: monthEnd } = currentMonthRange();
 
-    // ─── 1. Stats tháng hiện tại (cho netReceived, totalRevenue, couponsPaid) ───
-    const monthReq = pool
+    // ─── 1. Stats tháng hiện tại ──────────────────────────────────────────────
+    type MonthStatsRow = { PaidLinks: number; TotalRevenue: number; Customers: number };
+    const monthRes = await pool
       .request()
-      .input("monthStart", sql.DateTime, monthStart)
-      .input("monthEnd",   sql.DateTime, monthEnd);
-    if (isFiltered) monthReq.input("partnerId", sql.Int, numPartnerId);
-
-    type MonthStatsRow = {
-      PaidLinks: number;
-      TotalRevenue: number;
-      Customers: number;
-    };
-
-    const monthRes = await monthReq.query<MonthStatsRow>(`
-      SELECT
-        COUNT(*)                                          AS PaidLinks,
-        ISNULL(SUM(pkg.Amount), 0)                        AS TotalRevenue,
-        COUNT(DISTINCT o.UserName)                        AS Customers
-      FROM  Coupons cp
-      INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
-      LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
-      WHERE ${partnerClause}
-        AND cp.IsUsed   = 1
-        AND o.OrderDate >= @monthStart
-        AND o.OrderDate <  @monthEnd
-    `);
+      .input("PartnerId",  sql.Int,      validPartnerId)
+      .input("MonthStart", sql.DateTime, monthStart)
+      .input("MonthEnd",   sql.DateTime, monthEnd)
+      .execute<MonthStatsRow>("usp_GetDashboardMonthStats");
 
     const m = monthRes.recordset[0] ?? { PaidLinks: 0, TotalRevenue: 0, Customers: 0 };
 
-    // ─── 2. Tổng coupon (all-time, cho couponsCreated + status breakdown) ───────
-    const allReq = pool.request();
-    if (isFiltered) allReq.input("partnerId2", sql.Int, numPartnerId);
-    const partnerClause2 = isFiltered ? "cp.PartnerId = @partnerId2" : "1=1";
-
+    // ─── 2. Tổng coupon all-time ──────────────────────────────────────────────
     type AllStatsRow = {
       GeneratedLinks: number;
       PaidLinks: number;
       PendingLinks: number;
       ExpiredLinks: number;
     };
-
-    const allRes = await allReq.query<AllStatsRow>(`
-      SELECT
-        COUNT(*)                                                                                AS GeneratedLinks,
-        SUM(CASE WHEN cp.IsUsed = 1 THEN 1 ELSE 0 END)                                        AS PaidLinks,
-        SUM(CASE WHEN cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END) AS PendingLinks,
-        SUM(CASE WHEN cp.IsUsed = 0 AND cp.ExpireDate < GETDATE() THEN 1 ELSE 0 END)           AS ExpiredLinks
-      FROM  Coupons cp
-      LEFT  JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.CouponCode = cp.CouponCode
-      WHERE ${partnerClause2}
-    `);
+    const allRes = await pool
+      .request()
+      .input("PartnerId", sql.Int, validPartnerId)
+      .execute<AllStatsRow>("usp_GetDashboardAllStats");
 
     const a = allRes.recordset[0] ?? { GeneratedLinks: 0, PaidLinks: 0, PendingLinks: 0, ExpiredLinks: 0 };
 
-    // ─── 3. Doanh số pending (để tính hoa hồng ước tính) ─────────────────────────
-    const pendingReq = pool.request();
-    if (isFiltered) pendingReq.input("partnerId4", sql.Int, numPartnerId);
-    const partnerClause4 = isFiltered ? "cp.PartnerId = @partnerId4" : "1=1";
-
+    // ─── 3. Doanh số pending ─────────────────────────────────────────────────
     type PendingRow = { PendingRevenue: number };
-    const pendingRes = await pendingReq.query<PendingRow>(`
-      SELECT ISNULL(SUM(pkg.Amount), 0) AS PendingRevenue
-      FROM  Coupons cp
-      LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
-      LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
-        o.PackageID,
-        TRY_CAST(SUBSTRING(
-          cp.PaymentLink,
-          CHARINDEX('packageId=', cp.PaymentLink) + 10,
-          CHARINDEX('&', cp.PaymentLink + '&', CHARINDEX('packageId=', cp.PaymentLink) + 10)
-            - (CHARINDEX('packageId=', cp.PaymentLink) + 10)
-        ) AS INT)
-      )
-      WHERE ${partnerClause4}
-        AND cp.IsUsed = 0
-        AND o.OrderID IS NULL
-        AND cp.ExpireDate >= GETDATE()
-    `);
+    const pendingRes = await pool
+      .request()
+      .input("PartnerId", sql.Int, validPartnerId)
+      .execute<PendingRow>("usp_GetDashboardPendingRevenue");
 
     const pendingRevenue = pendingRes.recordset[0]?.PendingRevenue ?? 0;
 
-    // ─── 4. Monthly trend — 6 tháng gần nhất ────────────────────────────────────
+    // ─── 4. Monthly trend — 6 tháng gần nhất ────────────────────────────────
     const since = new Date(Date.now() - 180 * 86_400_000);
-    const trendReq = pool
-      .request()
-      .input("since", sql.DateTime, since);
-    if (isFiltered) trendReq.input("partnerId3", sql.Int, numPartnerId);
-    const partnerClause3 = isFiltered ? "cp.PartnerId = @partnerId3" : "1=1";
-
     type TrendRow = { Month: string; Revenue: number };
-    const trendRes = await trendReq.query<TrendRow>(`
-      SELECT
-        FORMAT(o.OrderDate, 'yyyy-MM') AS Month,
-        SUM(pkg.Amount)                AS Revenue
-      FROM  Coupons cp
-      INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
-      LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
-      WHERE ${partnerClause3}
-        AND cp.IsUsed      = 1
-        AND o.OrderDate >= @since
-      GROUP BY FORMAT(o.OrderDate, 'yyyy-MM')
-      ORDER BY Month
-    `);
+    const trendRes = await pool
+      .request()
+      .input("PartnerId", sql.Int,      validPartnerId)
+      .input("Since",     sql.DateTime, since)
+      .execute<TrendRow>("usp_GetDashboardTrend");
 
     const monthlySeries = trendRes.recordset.map((r) => ({
       month: r.Month,
       revenue: r.Revenue,
-      // Mỗi tháng tính hoa hồng độc lập (monthly reset).
       commission: calcCommissionFromTotal(r.Revenue),
     }));
 
-    // ─── Tổng hợp ────────────────────────────────────────────────────────────────
+    // ─── Tổng hợp ────────────────────────────────────────────────────────────
     const totalRevenue = m.TotalRevenue;
     const netReceived = calcCommissionFromTotal(totalRevenue);
 
-    // Ước tính hoa hồng tăng thêm nếu tất cả pending coupon được thanh toán tháng này.
     const pendingAmount = Math.max(
       0,
       calcCommissionFromTotal(totalRevenue + pendingRevenue) - netReceived,
     );
 
-    // Tỷ lệ thanh toán: all-time paid / all-time created (đúng hơn so với cross-period).
     const conversionRate =
       a.GeneratedLinks > 0 ? (a.PaidLinks / a.GeneratedLinks) * 100 : 0;
 

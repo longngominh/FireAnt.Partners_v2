@@ -75,29 +75,6 @@ export default async function PartnerDetailPage({
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Cấu hình hoa hồng</CardTitle>
-          <CardDescription>
-            Tham chiếu doanh thu để áp dụng hai mức giảm khác nhau.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <DetailRow
-            label="Mốc doanh thu"
-            value={formatVND(partner.revenueReference)}
-          />
-          <DetailRow
-            label="Mức giảm dưới mốc"
-            value={`${(partner.underDiscountRate * 100).toFixed(1)}%`}
-          />
-          <DetailRow
-            label="Mức giảm trên mốc"
-            value={`${(partner.aboveDiscountRate * 100).toFixed(1)}%`}
-          />
-        </CardContent>
-      </Card>
-
       <div className="grid auto-rows-fr grid-cols-2 gap-4 lg:grid-cols-4">
         <HeroTile
           label="Hoa hồng đối tác đã nhận"
@@ -119,7 +96,7 @@ export default async function PartnerDetailPage({
           icon={<ClockIcon className="size-4" />}
         />
         <KpiTile
-          label="Tổng coupon"
+          label="Tổng link đã tạo"
           value={formatNumber(couponCount)}
           icon={<TicketIcon className="size-4" />}
         />

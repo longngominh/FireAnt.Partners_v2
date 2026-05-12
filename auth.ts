@@ -14,7 +14,7 @@ type IS4Profile = {
 type PartnerRow = {
   PartnerId: number;
   IsActive: boolean | null;
-  UserId: string;
+  UserName: string;
 };
 
 const is4BaseUrl = process.env.AUTH_IS4_ISSUER ?? "https://accounts.fireant.vn";
@@ -44,44 +44,26 @@ const IdentityServer4: OIDCConfig<IS4Profile> = {
   },
 };
 
-/** Lookup partner từ bảng Partners theo IS4 sub (UserId) hoặc username fallback */
+/** Lookup partner từ bảng Partners theo UserName */
 async function lookupPartner(
-  sub: string,
-  username?: string,
+  username: string,
 ): Promise<PartnerRow | null> {
   try {
     const pool = await getPool();
 
-    // 1. Thử trực tiếp: Partners.UserId = IS4 sub
-    const r1 = await pool
+    const r = await pool
       .request()
-      .input("userId", sql.NVarChar(128), sub)
-      .query<PartnerRow>("SELECT PartnerId, IsActive, UserId FROM Partners WHERE UserId = @userId");
+      .input("username", sql.NVarChar(256), username)
+      .query<PartnerRow>(
+        "SELECT PartnerId, IsActive, UserName FROM Partners WHERE UserName = @username",
+      );
 
-    if (r1.recordset[0]) {
-      console.log("[auth] lookupPartner by UserId →", r1.recordset[0]);
-      return r1.recordset[0];
+    if (r.recordset[0]) {
+      console.log("[auth] lookupPartner by UserName →", r.recordset[0]);
+      return r.recordset[0];
     }
 
-    // 2. Fallback: join qua AspNetUsers để lookup bằng username/email
-    if (username) {
-      const r2 = await pool
-        .request()
-        .input("username", sql.NVarChar(256), username)
-        .query<PartnerRow>(`
-          SELECT p.PartnerId, p.IsActive, p.UserId
-          FROM   Partners p
-          INNER  JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers u ON p.UserId = u.Id
-          WHERE  u.UserName = @username OR u.Email = @username
-        `);
-
-      if (r2.recordset[0]) {
-        console.log("[auth] lookupPartner by username fallback →", r2.recordset[0]);
-        return r2.recordset[0];
-      }
-    }
-
-    console.log("[auth] lookupPartner: not found — sub=", sub, "username=", username);
+    console.log("[auth] lookupPartner: not found — username=", username);
     return null;
   } catch (err) {
     console.error("[auth] lookupPartner error:", err);
@@ -117,7 +99,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (hasAdminRole(p?.role)) return true;
 
       // Kiểm tra partner trong DB — IsActive null nghĩa là chưa set, coi là active
-      const partner = await lookupPartner(sub, p?.name);
+      const partner = await lookupPartner(p?.name ?? "");
       if (partner !== null && partner.IsActive !== false) return true;
 
       return false;
@@ -136,11 +118,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.partnerId = null;
         } else {
           // Không phải admin → kiểm tra partner trong DB
-          const partner = await lookupPartner(sub, p?.name);
+          const partner = await lookupPartner(p?.name ?? "");
           if (partner !== null && partner.IsActive !== false) {
             token.role = "partner";
             token.partnerId = String(partner.PartnerId);
-            token.userId = partner.UserId;
+            token.userId = partner.UserName;
           } else {
             token.role = null;
             token.partnerId = null;

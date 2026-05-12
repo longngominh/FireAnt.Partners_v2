@@ -42,12 +42,12 @@ export function CommissionProgress({
     `${(b.rate * 100 % 1 === 0 ? (b.rate * 100).toFixed(0) : (b.rate * 100).toFixed(1))}%`;
 
   return (
-    <Card className={cn("flex flex-col gap-3 p-5", className)}>
+    <Card className={cn("flex flex-col gap-3 p-5 transition-shadow duration-200 hover:shadow-md", className)}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/80">
           Mức hoa hồng tháng này
         </span>
-        <span className="num text-base font-semibold text-brand">
+        <span className="num text-base font-bold text-brand">
           {milestoneLabel(currentBand)}
         </span>
       </div>
@@ -55,7 +55,7 @@ export function CommissionProgress({
       {/* Progress bar */}
       <div className="relative h-2 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-brand transition-all duration-500"
+          className="h-full rounded-full bg-gradient-to-r from-brand/80 to-brand transition-all duration-500"
           style={{ width: `${progressPct}%` }}
         />
       </div>

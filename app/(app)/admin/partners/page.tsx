@@ -3,7 +3,6 @@ import { format } from "date-fns";
 import { vi } from "date-fns/locale";
 import { PlusIcon, ExternalLinkIcon } from "lucide-react";
 import { auth } from "@/auth";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -25,7 +24,7 @@ export default async function AdminPartnersPage() {
     return null;
   }
 
-  const partners = await listPartners();
+  const partners = (await listPartners()).filter((p) => p.isActive);
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,7 +48,6 @@ export default async function AdminPartnersPage() {
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               <TableHead>Đối tác</TableHead>
-              <TableHead>Trạng thái</TableHead>
               <TableHead className="text-right">Doanh thu</TableHead>
               <TableHead className="bg-success/5 text-right text-success">
                 Hoa hồng
@@ -68,18 +66,6 @@ export default async function AdminPartnersPage() {
                     <span className="text-sm font-medium">{p.name}</span>
                     <span className="text-xs text-muted-foreground">{p.email}</span>
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant="outline"
-                    className={
-                      p.isActive
-                        ? "border-success/30 bg-success/15 text-success"
-                        : "border-muted-foreground/30 bg-muted text-muted-foreground"
-                    }
-                  >
-                    {p.isActive ? "Hoạt động" : "Tạm dừng"}
-                  </Badge>
                 </TableCell>
                 <TableCell className="num text-right text-sm">
                   {formatVND(p.totalRevenue)}
