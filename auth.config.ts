@@ -54,7 +54,8 @@ export const authConfig = {
 
       if (isPublic) {
         if (isLoggedIn && path === "/login") {
-          return Response.redirect(new URL("/dashboard", request.nextUrl));
+          const dest = auth?.user?.role === "admin" ? "/admin" : "/dashboard";
+          return Response.redirect(new URL(dest, request.nextUrl));
         }
         return true;
       }
