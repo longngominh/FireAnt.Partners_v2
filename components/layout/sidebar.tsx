@@ -69,13 +69,13 @@ export function Sidebar({ role }: { role: string }) {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
       {/* Brand header */}
-      <div className="flex h-14 items-center gap-2.5 border-b px-4">
+      <Link href="/" className="flex h-14 items-center gap-2.5 border-b px-4 hover:bg-sidebar-accent/50 transition-colors">
         <Image src="/logo.png" alt="FireAnt" width={30} height={30} className="rounded-lg shadow-sm" />
         <div className="flex flex-col leading-none">
           <span className="text-sm font-bold tracking-tight">FireAnt</span>
           <span className="text-[11px] font-medium text-sidebar-primary/70">Partners</span>
         </div>
-      </div>
+      </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-5">
         {!isAdmin && (

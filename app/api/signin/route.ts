@@ -7,9 +7,9 @@ import type { NextRequest } from "next/server";
  * /login page redirect về đây thay vì gọi signIn() trực tiếp.
  */
 export async function GET(request: NextRequest) {
-  const raw = request.nextUrl.searchParams.get("callbackUrl") ?? "/dashboard";
+  const raw = request.nextUrl.searchParams.get("callbackUrl") ?? "/";
   // Chỉ cho phép relative URL (bắt đầu bằng /) để tránh redirect về IS4 URL
   // hoặc bất kỳ external URL nào gây redirect loop.
-  const callbackUrl = raw.startsWith("/") ? raw : "/dashboard";
+  const callbackUrl = raw.startsWith("/") ? raw : "/";
   await signIn("identity-server4", { redirectTo: callbackUrl });
 }
