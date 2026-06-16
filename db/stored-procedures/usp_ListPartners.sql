@@ -3,6 +3,17 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.IsUsed = 1
+    GROUP BY cp.CouponID
+  )
   SELECT
     p.PartnerId,
     i.UserName, i.Email, i.Name, i.PhoneNumber,
@@ -22,7 +33,8 @@ BEGIN
       COUNT(*)                                                              AS CouponCount,
       COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)          AS CustomerCount
     FROM  Coupons cp
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+    LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
     LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
     GROUP BY cp.PartnerId
   ) stats ON p.PartnerId = stats.PartnerId

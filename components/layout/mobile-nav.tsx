@@ -51,7 +51,10 @@ export function MobileNav({ role }: { role: string }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const isAdmin = role === "admin";
-  const navItems = isAdmin ? adminNav : partnerNav;
+  const sections = [
+    ...(isAdmin ? [{ label: "Quản trị", items: adminNav }] : []),
+    { label: "Đối tác", items: partnerNav },
+  ];
 
   return (
     <div className="md:hidden">
@@ -76,32 +79,36 @@ export function MobileNav({ role }: { role: string }) {
           </SheetHeader>
 
           <nav className="flex-1 overflow-y-auto px-3 py-5">
-            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-              {isAdmin ? "Quản trị" : "Đối tác"}
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = isActive(pathname, item.href, item.exact);
-                return (
-                  <SheetClose asChild key={item.href}>
-                    <Link
-                      href={item.href}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md py-2.5 pr-3 pl-3 text-sm transition-all duration-150",
-                        "hover:bg-accent hover:text-accent-foreground",
-                        active
-                          ? "border-l-2 border-primary bg-accent pl-[10px] font-semibold text-accent-foreground"
-                          : "font-medium text-foreground/70",
-                      )}
-                    >
-                      <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-foreground/50")} />
-                      <span>{item.label}</span>
-                    </Link>
-                  </SheetClose>
-                );
-              })}
-            </div>
+            {sections.map((section, index) => (
+              <div key={section.label} className={index > 0 ? "mt-5" : ""}>
+                <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                  {section.label}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {section.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(pathname, item.href, item.exact);
+                    return (
+                      <SheetClose asChild key={item.href}>
+                        <Link
+                          href={item.href}
+                          className={cn(
+                            "flex items-center gap-3 rounded-md py-2.5 pr-3 pl-3 text-sm transition-all duration-150",
+                            "hover:bg-accent hover:text-accent-foreground",
+                            active
+                              ? "border-l-2 border-primary bg-accent pl-[10px] font-semibold text-accent-foreground"
+                              : "font-medium text-foreground/70",
+                          )}
+                        >
+                          <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-foreground/50")} />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SheetClose>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
         </SheetContent>
       </Sheet>

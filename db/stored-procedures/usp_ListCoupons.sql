@@ -8,6 +8,49 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PagedCoupons AS (
+    SELECT
+      cp.CouponID,
+      cp.CouponCode,
+      cp.PaymentLink,
+      cp.IsUsed,
+      cp.CreatedDate,
+      cp.ExpireDate,
+      cp.UserName,
+      cp.Note
+    FROM Coupons cp
+    WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (
+        @Status = 'ALL'
+        OR (@Status = 'PAID'    AND cp.IsUsed = 1)
+        OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        ))
+        OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
+        OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() AND NOT EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        ))
+      )
+      AND (
+        @Q IS NULL
+        OR cp.CouponCode LIKE @Q
+        OR ISNULL(cp.UserName, '') LIKE @Q
+        OR cp.PaymentLink LIKE @Q
+        OR EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode
+            AND so.Status = 1
+            AND ISNULL(so.UserName, '') LIKE @Q
+        )
+      )
+    ORDER BY cp.CreatedDate DESC
+    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+  )
   SELECT
     cp.CouponID,
     cp.CouponCode,
@@ -33,8 +76,18 @@ BEGIN
     pkg.PackageName,
     cp.UserName,
     cp.Note
-  FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  FROM  PagedCoupons cp
+  OUTER APPLY (
+    SELECT TOP (1)
+      so.OrderID,
+      so.OrderDate,
+      so.UserName,
+      so.PackageID
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
@@ -44,15 +97,5 @@ BEGIN
         - (CHARINDEX('packageId=', cp.PaymentLink) + 10)
     ) AS INT)
   )
-  WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
-    AND (
-      @Status = 'ALL'
-      OR (@Status = 'PAID'    AND cp.IsUsed = 1)
-      OR (@Status = 'USED'    AND o.OrderID IS NOT NULL AND cp.IsUsed = 0)
-      OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
-      OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE())
-    )
-    AND (@Q IS NULL OR cp.CouponCode LIKE @Q OR ISNULL(o.UserName,'') LIKE @Q OR cp.PaymentLink LIKE @Q)
-  ORDER BY cp.CreatedDate DESC
-  OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+  ORDER BY cp.CreatedDate DESC;
 END;

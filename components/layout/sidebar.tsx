@@ -78,19 +78,6 @@ export function Sidebar({ role }: { role: string }) {
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-5">
-        {!isAdmin && (
-          <>
-            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
-              Đối tác
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {partnerNav.map((item) => (
-                <NavLink key={item.href} item={item} pathname={pathname} />
-              ))}
-            </div>
-          </>
-        )}
-
         {isAdmin && (
           <>
             <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
@@ -103,6 +90,17 @@ export function Sidebar({ role }: { role: string }) {
             </div>
           </>
         )}
+
+        <div className={isAdmin ? "mt-5" : ""}>
+          <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+            Đối tác
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {partnerNav.map((item) => (
+              <NavLink key={item.href} item={item} pathname={pathname} />
+            ))}
+          </div>
+        </div>
       </nav>
 
       {/* Sidebar footer accent */}

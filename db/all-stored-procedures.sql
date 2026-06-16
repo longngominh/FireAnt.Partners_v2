@@ -19,16 +19,34 @@ BEGIN
 
   SELECT COUNT(*) AS Total
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.CouponCode = cp.CouponCode
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND (
       @Status = 'ALL'
       OR (@Status = 'PAID'    AND cp.IsUsed = 1)
-      OR (@Status = 'USED'    AND o.OrderID IS NOT NULL AND cp.IsUsed = 0)
+      OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
+        SELECT 1
+        FROM [EStocks_Data].[dbo].[service_Orders] so
+        WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+      ))
       OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
-      OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE())
+      OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() AND NOT EXISTS (
+        SELECT 1
+        FROM [EStocks_Data].[dbo].[service_Orders] so
+        WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+      ))
     )
-    AND (@Q IS NULL OR cp.CouponCode LIKE @Q OR ISNULL(cp.UserName,'') LIKE @Q);
+    AND (
+      @Q IS NULL
+      OR cp.CouponCode LIKE @Q
+      OR ISNULL(cp.UserName,'') LIKE @Q
+      OR EXISTS (
+        SELECT 1
+        FROM [EStocks_Data].[dbo].[service_Orders] so
+        WHERE so.CouponCode = cp.CouponCode
+          AND so.Status = 1
+          AND ISNULL(so.UserName, '') LIKE @Q
+      )
+    );
 END;
 
 
@@ -45,7 +63,14 @@ BEGIN
 
   SELECT COUNT(DISTINCT o.UserName) AS Total
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.CouponCode = cp.CouponCode
+  CROSS APPLY (
+    SELECT TOP (1)
+      so.UserName
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers] u ON u.UserName = o.UserName
   WHERE cp.IsUsed = 1
     AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
@@ -112,7 +137,17 @@ BEGIN
     cp.UserName,
     cp.Note
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  OUTER APPLY (
+    SELECT TOP (1)
+      so.OrderID,
+      so.OrderDate,
+      so.UserName,
+      so.PackageID
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
@@ -139,10 +174,9 @@ BEGIN
   SELECT
     COUNT(*)                                                                                  AS GeneratedLinks,
     SUM(CASE WHEN cp.IsUsed = 1 THEN 1 ELSE 0 END)                                           AS PaidLinks,
-    SUM(CASE WHEN cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END) AS PendingLinks,
+    SUM(CASE WHEN cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END)             AS PendingLinks,
     SUM(CASE WHEN cp.IsUsed = 0 AND cp.ExpireDate < GETDATE() THEN 1 ELSE 0 END)              AS ExpiredLinks
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.CouponCode = cp.CouponCode
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId);
 END;
 
@@ -159,12 +193,25 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.IsUsed = 1
+      AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    GROUP BY cp.CouponID
+  )
   SELECT
     COUNT(*)                       AS PaidLinks,
     ISNULL(SUM(pkg.Amount), 0)     AS TotalRevenue,
     COUNT(DISTINCT o.UserName)     AS Customers
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed   = 1
@@ -185,19 +232,14 @@ BEGIN
 
   SELECT ISNULL(SUM(pkg.Amount), 0) AS PendingRevenue
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
-    o.PackageID,
-    TRY_CAST(SUBSTRING(
+  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = TRY_CAST(SUBSTRING(
       cp.PaymentLink,
       CHARINDEX('packageId=', cp.PaymentLink) + 10,
       CHARINDEX('&', cp.PaymentLink + '&', CHARINDEX('packageId=', cp.PaymentLink) + 10)
         - (CHARINDEX('packageId=', cp.PaymentLink) + 10)
     ) AS INT)
-  )
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed    = 0
-    AND o.OrderID   IS NULL
     AND cp.ExpireDate >= GETDATE();
 END;
 
@@ -213,11 +255,24 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.IsUsed = 1
+      AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    GROUP BY cp.CouponID
+  )
   SELECT
     FORMAT(o.OrderDate, 'yyyy-MM') AS Month,
     SUM(pkg.Amount)                AS Revenue
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed    = 1
@@ -260,14 +315,27 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.PartnerId = @PartnerId
+      AND cp.IsUsed = 1
+    GROUP BY cp.CouponID
+  )
   SELECT
     COUNT(*)                                                                                  AS TotalCoupons,
     SUM(CASE WHEN cp.IsUsed = 1 THEN 1 ELSE 0 END)                                           AS PaidCoupons,
-    SUM(CASE WHEN cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END) AS PendingCoupons,
+    SUM(CASE WHEN cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END)             AS PendingCoupons,
     ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN pkg.Amount ELSE 0 END), 0)                       AS TotalRevenue,
     COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)                               AS CustomerCount
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
   WHERE cp.PartnerId = @PartnerId;
 END;
@@ -283,12 +351,25 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.PartnerId = @PartnerId
+      AND cp.IsUsed = 1
+    GROUP BY cp.CouponID
+  )
   -- Trả về 6 tháng gần nhất có doanh thu, sắp xếp DESC để gọi .reverse() phía app
   SELECT TOP 6
     FORMAT(o.OrderDate, 'yyyy-MM') AS Month,
     SUM(pkg.Amount)                AS Revenue
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
   WHERE cp.PartnerId = @PartnerId
     AND cp.IsUsed    = 1
@@ -309,6 +390,19 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.IsUsed = 1
+      AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (@Since IS NULL OR cp.CreatedDate >= @Since)
+    GROUP BY cp.CouponID
+  )
   SELECT
     CASE
       WHEN @IsDaily = 1 THEN FORMAT(o.OrderDate, 'yyyy-MM-dd')
@@ -316,7 +410,8 @@ BEGIN
     END                                                               AS Period,
     SUM(pkg.Amount)                                                   AS Revenue
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed = 1
@@ -344,6 +439,49 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PagedCoupons AS (
+    SELECT
+      cp.CouponID,
+      cp.CouponCode,
+      cp.PaymentLink,
+      cp.IsUsed,
+      cp.CreatedDate,
+      cp.ExpireDate,
+      cp.UserName,
+      cp.Note
+    FROM Coupons cp
+    WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (
+        @Status = 'ALL'
+        OR (@Status = 'PAID'    AND cp.IsUsed = 1)
+        OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        ))
+        OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
+        OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() AND NOT EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        ))
+      )
+      AND (
+        @Q IS NULL
+        OR cp.CouponCode LIKE @Q
+        OR ISNULL(cp.UserName, '') LIKE @Q
+        OR cp.PaymentLink LIKE @Q
+        OR EXISTS (
+          SELECT 1
+          FROM [EStocks_Data].[dbo].[service_Orders] so
+          WHERE so.CouponCode = cp.CouponCode
+            AND so.Status = 1
+            AND ISNULL(so.UserName, '') LIKE @Q
+        )
+      )
+    ORDER BY cp.CreatedDate DESC
+    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+  )
   SELECT
     cp.CouponID,
     cp.CouponCode,
@@ -369,8 +507,18 @@ BEGIN
     pkg.PackageName,
     cp.UserName,
     cp.Note
-  FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  FROM  PagedCoupons cp
+  OUTER APPLY (
+    SELECT TOP (1)
+      so.OrderID,
+      so.OrderDate,
+      so.UserName,
+      so.PackageID
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
@@ -380,17 +528,7 @@ BEGIN
         - (CHARINDEX('packageId=', cp.PaymentLink) + 10)
     ) AS INT)
   )
-  WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
-    AND (
-      @Status = 'ALL'
-      OR (@Status = 'PAID'    AND cp.IsUsed = 1)
-      OR (@Status = 'USED'    AND o.OrderID IS NOT NULL AND cp.IsUsed = 0)
-      OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
-      OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND o.OrderID IS NULL AND cp.ExpireDate >= GETDATE())
-    )
-    AND (@Q IS NULL OR cp.CouponCode LIKE @Q OR ISNULL(o.UserName,'') LIKE @Q OR cp.PaymentLink LIKE @Q)
-  ORDER BY cp.CreatedDate DESC
-  OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+  ORDER BY cp.CreatedDate DESC;
 END;
 
 
@@ -431,7 +569,17 @@ BEGIN
       ORDER BY so2.OrderDate DESC)                     AS LatestPackage,
     pu.Name AS PartnerName
   FROM  Coupons cp
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]             o   ON o.CouponCode  = cp.CouponCode
+  CROSS APPLY (
+    SELECT TOP (1)
+      so.OrderID,
+      so.OrderDate,
+      so.UserName,
+      so.PackageID
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages]           pkg ON o.PackageID   = pkg.PackageID
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers]    u   ON u.UserName    = o.UserName
   LEFT  JOIN Partners                                          p   ON p.PartnerId   = cp.PartnerId
@@ -471,6 +619,17 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  WITH PaidOrderIds AS (
+    SELECT
+      cp.CouponID,
+      MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+      ON so.CouponCode = cp.CouponCode
+     AND so.Status = 1
+    WHERE cp.IsUsed = 1
+    GROUP BY cp.CouponID
+  )
   SELECT
     p.PartnerId,
     i.UserName, i.Email, i.Name, i.PhoneNumber,
@@ -490,7 +649,8 @@ BEGIN
       COUNT(*)                                                              AS CouponCount,
       COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)          AS CustomerCount
     FROM  Coupons cp
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+    LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
     LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
     GROUP BY cp.PartnerId
   ) stats ON p.PartnerId = stats.PartnerId

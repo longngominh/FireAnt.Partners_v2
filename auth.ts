@@ -73,10 +73,16 @@ async function lookupPartner(
 
 /** Kiểm tra IS4 roles claim có chứa admin role không */
 function hasAdminRole(roles: string | string[] | undefined): boolean {
-  const adminRole = process.env.AUTH_ADMIN_ROLE ?? "admin";
+  const adminRoles = new Set(
+    [
+      process.env.AUTH_ADMIN_ROLE ?? "admin",
+      "Administrator",
+      "PartnerAdmin",
+    ].filter(Boolean),
+  );
   if (!roles) return false;
-  if (Array.isArray(roles)) return roles.includes(adminRole);
-  return roles === adminRole;
+  if (Array.isArray(roles)) return roles.some((role) => adminRoles.has(role));
+  return adminRoles.has(roles);
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -109,13 +115,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (account) {
         token.accessToken = account.access_token;
 
-        const sub = token.sub ?? "";
         const p = profile as IS4Profile | undefined;
 
-        // Admin IS4 được ưu tiên trước — dù có trong Partners vẫn là admin
+        // Admin IS4 vẫn giữ quyền admin, nhưng nếu cũng là partner thì giữ partnerId
+        // để dùng các chức năng tạo link của partner.
         if (hasAdminRole(p?.role)) {
           token.role = "admin";
-          token.partnerId = null;
+          const partner = await lookupPartner(p?.name ?? "");
+          token.partnerId =
+            partner !== null && partner.IsActive !== false
+              ? String(partner.PartnerId)
+              : null;
+          token.userId = partner?.UserName ?? null;
         } else {
           // Không phải admin → kiểm tra partner trong DB
           const partner = await lookupPartner(p?.name ?? "");

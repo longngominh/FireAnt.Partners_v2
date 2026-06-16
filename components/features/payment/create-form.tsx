@@ -15,6 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatVND } from "@/lib/utils/currency";
 import { createPaymentAction } from "@/lib/payment/actions";
 import {
@@ -22,8 +29,12 @@ import {
   type CreatePaymentState,
 } from "@/lib/payment/types";
 import type { ServicePackage } from "@/lib/data/packages";
+import type { Partner } from "@/lib/data/partners";
 
-type Props = { packages: ServicePackage[] };
+type Props = {
+  packages: ServicePackage[];
+  partners?: Partner[];
+};
 
 const SERVICE_BADGE: Record<number, { label: string; color: string }> = {
   33: { label: "Thiết yếu",      color: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300" },
@@ -31,7 +42,7 @@ const SERVICE_BADGE: Record<number, { label: string; color: string }> = {
   35: { label: "Cao cấp",        color: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300" },
 };
 
-export function CreatePaymentForm({ packages }: Props) {
+export function CreatePaymentForm({ packages, partners = [] }: Props) {
   const [state, action, pending] = useActionState<CreatePaymentState, FormData>(
     createPaymentAction,
     createPaymentInitialState,
@@ -57,6 +68,9 @@ export function CreatePaymentForm({ packages }: Props) {
     services[0]?.serviceId ?? null,
   );
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>(
+    partners[0] ? String(partners[0].id) : "",
+  );
 
   const currentServicePackages = useMemo(
     () => services.find((s) => s.serviceId === selectedServiceId)?.packages ?? [],
@@ -68,8 +82,6 @@ export function CreatePaymentForm({ packages }: Props) {
     setSelectedServiceId(serviceId);
     setSelectedPackage(null);
   }
-
-  const amount = selectedPackage?.amount ?? 0;
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const lastSeenCodeRef = useRef<string | null>(null);
@@ -109,18 +121,53 @@ export function CreatePaymentForm({ packages }: Props) {
     a.click();
   }
 
-  const canSubmit = !!selectedPackage && !pending;
+  const needsPartnerSelection = partners.length > 0;
+  const canSubmit = !!selectedPackage && !pending && (!needsPartnerSelection || !!selectedPartnerId);
 
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_360px]">
       <form action={action} className="flex flex-col gap-4">
         {/* Hidden fields */}
+        {selectedPartnerId ? (
+          <input type="hidden" name="partnerId" value={selectedPartnerId} />
+        ) : null}
         {selectedPackage && (
           <>
             <input type="hidden" name="packageId" value={selectedPackage.packageId} />
             <input type="hidden" name="amount" value={Math.round(selectedPackage.amount)} />
           </>
         )}
+
+        {needsPartnerSelection ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Chọn đối tác</CardTitle>
+              <CardDescription>
+                Link thanh toán sẽ được ghi nhận cho đối tác được chọn.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Đối tác
+              </Label>
+              <Select value={selectedPartnerId} onValueChange={setSelectedPartnerId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Chọn đối tác" />
+                </SelectTrigger>
+                <SelectContent>
+                  {partners.map((partner) => (
+                    <SelectItem key={partner.id} value={String(partner.id)}>
+                      {partner.name ?? partner.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {state.fieldErrors?.partnerId ? (
+                <p className="text-xs text-destructive">{state.fieldErrors.partnerId[0]}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card>
           <CardHeader>

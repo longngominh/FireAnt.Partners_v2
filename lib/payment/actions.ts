@@ -17,9 +17,19 @@ export async function createPaymentAction(
   const session = await auth();
   if (!session?.user) return { ok: false, error: "Phiên đăng nhập đã hết hạn." };
 
-  const partnerId = session.user.partnerId;
+  const isAdmin = session.user.role === "admin";
+  const requestedPartnerId = formData.get("partnerId");
+  const partnerId =
+    isAdmin && typeof requestedPartnerId === "string" && requestedPartnerId.trim()
+      ? requestedPartnerId.trim()
+      : session.user.partnerId;
+
   if (!partnerId) {
-    return { ok: false, error: "Tài khoản chưa được gán đối tác — không thể tạo link." };
+    return {
+      ok: false,
+      error: "Vui lòng chọn đối tác để tạo link.",
+      fieldErrors: { partnerId: ["Vui lòng chọn đối tác"] },
+    };
   }
 
   const parsed = createPaymentSchema.safeParse({
@@ -38,6 +48,15 @@ export async function createPaymentAction(
   }
 
   try {
+    const partner = await getPartner(partnerId);
+    if (!partner || !partner.isActive) {
+      return {
+        ok: false,
+        error: "Không tìm thấy đối tác đang hoạt động.",
+        fieldErrors: { partnerId: ["Đối tác không hợp lệ"] },
+      };
+    }
+
     const code = generateShortCode(8);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
     const shortLink = buildShortLink(baseUrl, code);
@@ -62,12 +81,10 @@ export async function createPaymentAction(
 
     const qrDataUrl = await qrToDataUrl(shortLink);
 
-    // Lấy partner để verify tồn tại (không cần tính commission ở đây)
-    const partner = await getPartner(partnerId);
-    if (!partner) return { ok: false, error: "Không tìm thấy thông tin đối tác." };
-
     revalidatePath("/payment");
     revalidatePath("/dashboard");
+    revalidatePath("/admin");
+    revalidatePath("/admin/partners");
 
     return {
       ok: true,

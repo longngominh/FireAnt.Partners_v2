@@ -14,11 +14,20 @@ import {
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HeroTile, KpiTile } from "@/components/features/dashboard/kpi-tile";
 import { TrendChart } from "@/components/features/dashboard/trend-chart";
+import { CouponTable } from "@/components/features/payment/coupon-table";
+import { FilterBar } from "@/components/features/payment/filter-bar";
+import { Pagination } from "@/components/shared/pagination";
 import { getPartnerPerformance } from "@/lib/data/partners";
+import { listCoupons, type CouponStatus } from "@/lib/data/payment";
 import { formatVND, formatNumber } from "@/lib/utils/currency";
+
+type SearchParams = Promise<{
+  q?: string;
+  status?: string;
+  page?: string;
+}>;
 
 export async function generateMetadata({
   params,
@@ -32,17 +41,33 @@ export async function generateMetadata({
 
 export default async function PartnerDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: SearchParams;
 }) {
   const session = await auth();
   if (session?.user.role !== "admin") redirect("/dashboard");
 
   const { id } = await params;
+  const query = await searchParams;
   const data = await getPartnerPerformance(id);
   if (!data) notFound();
 
   const { partner, totalRevenue, totalCommission, couponCount, paidCount, pendingCount, customerCount, conversionRate, monthlyTrend } = data;
+  const page = Number(query.page ?? "1") || 1;
+  const status = (query.status ?? "ALL") as CouponStatus | "ALL";
+  const {
+    rows: couponRows,
+    total: couponTotal,
+    pageSize,
+  } = await listCoupons({
+    partnerId: id,
+    status,
+    q: query.q ?? "",
+    page,
+    pageSize: 10,
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -120,17 +145,24 @@ export default async function PartnerDetailPage({
           icon={<TargetIcon className="size-4" />}
         />
       </div>
-    </div>
-  );
-}
 
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-md border bg-muted/30 p-3">
-      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="num font-mono text-base font-semibold">{value}</span>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold">Link đối tác đã tạo</h2>
+          <p className="text-sm text-muted-foreground">
+            Tổng {formatNumber(couponTotal)} link. Bấm vào từng hàng để xem QR và copy link nhanh.
+          </p>
+        </div>
+        <FilterBar />
+        <CouponTable rows={couponRows} />
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={couponTotal}
+          basePath={`/admin/partners/${partner.id}`}
+          searchParams={{ q: query.q, status: query.status }}
+        />
+      </div>
     </div>
   );
 }

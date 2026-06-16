@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import { PlusIcon, ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,12 +35,6 @@ export default async function AdminPartnersPage() {
             {partners.length} đối tác. Bấm vào hàng để xem hiệu suất chi tiết.
           </p>
         </div>
-        <Button asChild className="gap-2">
-          <Link href="/admin/partners/new">
-            <PlusIcon className="size-4" />
-            Tạo tài khoản đối tác
-          </Link>
-        </Button>
       </div>
 
       <Card className="overflow-hidden">
@@ -53,14 +47,17 @@ export default async function AdminPartnersPage() {
                 Hoa hồng
               </TableHead>
               <TableHead className="text-right">Khách</TableHead>
-              <TableHead className="text-right">Coupon</TableHead>
+              <TableHead className="text-right">Link</TableHead>
               <TableHead className="hidden md:table-cell">Hợp tác từ</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {partners.map((p) => (
-              <TableRow key={p.id} className="group">
+            {partners.map((p, index) => (
+              <TableRow
+                key={p.id}
+                className={`group ${index % 2 === 1 ? "bg-muted/20" : ""}`}
+              >
                 <TableCell>
                   <div className="flex flex-col leading-tight">
                     <span className="text-sm font-medium">{p.name}</span>

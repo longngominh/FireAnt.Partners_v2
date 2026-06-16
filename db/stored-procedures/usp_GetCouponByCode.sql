@@ -30,7 +30,17 @@ BEGIN
     cp.UserName,
     cp.Note
   FROM  Coupons cp
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.CouponCode = cp.CouponCode
+  OUTER APPLY (
+    SELECT TOP (1)
+      so.OrderID,
+      so.OrderDate,
+      so.UserName,
+      so.PackageID
+    FROM [EStocks_Data].[dbo].[service_Orders] so
+    WHERE so.CouponCode = cp.CouponCode
+      AND so.Status = 1
+    ORDER BY so.OrderDate DESC, so.OrderID DESC
+  ) o
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
