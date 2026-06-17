@@ -1,5 +1,6 @@
 import { getPool, sql } from "@/lib/db/sql";
 import { calcCommissionFromTotal } from "@/lib/commission";
+import { getTrendSeries, getTrendSinceDate, type TrendRange } from "@/lib/data/trend";
 
 export type Partner = {
   id: number;
@@ -31,6 +32,17 @@ export type PartnerPerformance = {
   monthlyTrend: Array<{ month: string; revenue: number; commission: number }>;
 };
 
+export type AdminDashboardPerformance = {
+  totalRevenue: number;
+  totalCommission: number;
+  couponCount: number;
+  paidCount: number;
+  pendingCount: number;
+  customerCount: number;
+  activePartnerCount: number;
+  monthlyTrend: Array<{ month: string; revenue: number; commission: number }>;
+};
+
 type PartnerRow = {
   PartnerId: number;
   UserName: string;
@@ -47,6 +59,49 @@ type PartnerRow = {
   CouponCount?: number;
   CreatedDate?: Date | null;
 };
+
+type PartnerStatsRow = {
+  TotalCoupons: number;
+  PaidCoupons: number;
+  PendingCoupons: number;
+  TotalRevenue: number;
+  CustomerCount: number;
+};
+
+const EMPTY_STATS: PartnerStatsRow = {
+  TotalCoupons: 0,
+  PaidCoupons: 0,
+  PendingCoupons: 0,
+  TotalRevenue: 0,
+  CustomerCount: 0,
+};
+
+async function getPartnerStats(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  partnerId: number | null,
+  since: Date | null,
+  activeOnly: boolean,
+): Promise<PartnerStatsRow> {
+  try {
+    const res = await pool
+      .request()
+      .input("PartnerId", sql.Int, partnerId)
+      .input("Since", sql.DateTime, since)
+      .input("ActiveOnly", sql.Bit, activeOnly ? 1 : 0)
+      .execute<PartnerStatsRow>("usp_GetPartnerStats");
+    return res.recordset[0] ?? EMPTY_STATS;
+  } catch (err) {
+    // Cho phép app vẫn chạy nếu DB chưa deploy bản procedure có @Since/@ActiveOnly.
+    if (partnerId === null || activeOnly) throw err;
+
+    console.warn("[getPartnerStats] Falling back to legacy usp_GetPartnerStats", err);
+    const res = await pool
+      .request()
+      .input("PartnerId", sql.Int, partnerId)
+      .execute<PartnerStatsRow>("usp_GetPartnerStats");
+    return res.recordset[0] ?? EMPTY_STATS;
+  }
+}
 
 function mapPartner(r: PartnerRow): Partner {
   const underRate = r.UnderDiscountRate ?? 0;
@@ -104,51 +159,32 @@ export async function getPartner(id: number | string): Promise<Partner | null> {
 
 export async function getPartnerPerformance(
   partnerId: number | string,
+  range: TrendRange = "ALL",
 ): Promise<PartnerPerformance | null> {
   const numId = typeof partnerId === "string" ? parseInt(partnerId, 10) : partnerId;
   if (isNaN(numId)) return null;
 
   try {
-    const partner = await getPartner(numId);
+    const [partner, pool] = await Promise.all([getPartner(numId), getPool()]);
     if (!partner) return null;
 
-    const pool = await getPool();
+    const since = getTrendSinceDate(range);
+    const trendPromise = getTrendSeries(numId, range);
 
-    type StatsRow = {
-      TotalCoupons: number;
-      PaidCoupons: number;
-      PendingCoupons: number;
-      TotalRevenue: number;
-      CustomerCount: number;
-    };
-    const statsRes = await pool
-      .request()
-      .input("PartnerId", sql.Int, numId)
-      .execute<StatsRow>("usp_GetPartnerStats");
+    const [statsRes, trendSeries] = await Promise.all([
+      getPartnerStats(pool, numId, since, false),
+      trendPromise,
+    ]);
 
-    const s = statsRes.recordset[0] ?? {
-      TotalCoupons: 0,
-      PaidCoupons: 0,
-      PendingCoupons: 0,
-      TotalRevenue: 0,
-      CustomerCount: 0,
-    };
-
-    type TrendRow = { Month: string; Revenue: number };
-    const trendRes = await pool
-      .request()
-      .input("PartnerId", sql.Int, numId)
-      .execute<TrendRow>("usp_GetPartnerTrend");
+    const s = statsRes;
 
     const totalCommission = calcCommissionFromTotal(s.TotalRevenue);
 
-    const monthlyTrend = trendRes.recordset
-      .reverse()
-      .map((r) => ({
-        month: r.Month,
-        revenue: r.Revenue,
-        commission: calcCommissionFromTotal(r.Revenue),
-      }));
+    const monthlyTrend = trendSeries.map((p) => ({
+      month: p.period,
+      revenue: p.revenue,
+      commission: p.commission,
+    }));
 
     return {
       partner,
@@ -164,5 +200,50 @@ export async function getPartnerPerformance(
   } catch (err) {
     console.error("[getPartnerPerformance]", err);
     return null;
+  }
+}
+
+export async function getAdminDashboardPerformance(
+  range: TrendRange,
+): Promise<AdminDashboardPerformance> {
+  try {
+    const [pool, partners] = await Promise.all([getPool(), listPartners()]);
+    const activePartnerCount = partners.filter((p) => p.isActive).length;
+    const since = getTrendSinceDate(range);
+    const trendPromise = getTrendSeries(null, range, true);
+
+    const [statsRes, trendSeries] = await Promise.all([
+      getPartnerStats(pool, null, since, true),
+      trendPromise,
+    ]);
+
+    const stats = statsRes;
+
+    return {
+      totalRevenue: stats.TotalRevenue,
+      totalCommission: calcCommissionFromTotal(stats.TotalRevenue),
+      couponCount: stats.TotalCoupons,
+      paidCount: stats.PaidCoupons,
+      pendingCount: stats.PendingCoupons,
+      customerCount: stats.CustomerCount,
+      activePartnerCount,
+      monthlyTrend: trendSeries.map((p) => ({
+        month: p.period,
+        revenue: p.revenue,
+        commission: p.commission,
+      })),
+    };
+  } catch (err) {
+    console.error("[getAdminDashboardPerformance]", err);
+    return {
+      totalRevenue: 0,
+      totalCommission: 0,
+      couponCount: 0,
+      paidCount: 0,
+      pendingCount: 0,
+      customerCount: 0,
+      activePartnerCount: 0,
+      monthlyTrend: [],
+    };
   }
 }

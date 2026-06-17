@@ -1,5 +1,7 @@
 CREATE OR ALTER PROCEDURE usp_GetPartnerStats
-  @PartnerId INT
+  @PartnerId  INT      = NULL,
+  @Since      DATETIME = NULL,
+  @ActiveOnly BIT      = 0
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -12,8 +14,11 @@ BEGIN
     INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
       ON so.CouponCode = cp.CouponCode
      AND so.Status = 1
-    WHERE cp.PartnerId = @PartnerId
+    LEFT JOIN Partners p ON p.PartnerId = cp.PartnerId
+    WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
       AND cp.IsUsed = 1
+      AND (@Since IS NULL OR cp.CreatedDate >= @Since)
+      AND (@ActiveOnly = 0 OR p.IsActive = 1)
     GROUP BY cp.CouponID
   )
   SELECT
@@ -26,5 +31,8 @@ BEGIN
   LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
-  WHERE cp.PartnerId = @PartnerId;
+  LEFT  JOIN Partners p ON p.PartnerId = cp.PartnerId
+  WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    AND (@Since IS NULL OR cp.CreatedDate >= @Since)
+    AND (@ActiveOnly = 0 OR p.IsActive = 1);
 END;

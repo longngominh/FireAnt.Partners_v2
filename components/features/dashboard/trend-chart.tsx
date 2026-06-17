@@ -20,12 +20,22 @@ type Props = {
   initialData: TrendPoint[];
   partnerId: string | number | null;
   partnerIds?: number[];
+  initialRange?: TrendRange;
+  showRangeControls?: boolean;
 };
 
-export function TrendChart({ initialData, partnerId, partnerIds }: Props) {
-  const [range, setRange] = useState<TrendRange>("1M");
+export function TrendChart({
+  initialData,
+  partnerId,
+  partnerIds,
+  initialRange = "1M",
+  showRangeControls = true,
+}: Props) {
+  const [range, setRange] = useState<TrendRange>(initialRange);
   const [data, setData] = useState<TrendPoint[]>(initialData);
   const [isPending, startTransition] = useTransition();
+  const displayRange = showRangeControls ? range : initialRange;
+  const displayData = showRangeControls ? data : initialData;
 
   function handleRangeChange(newRange: TrendRange) {
     if (newRange === range) return;
@@ -51,36 +61,38 @@ export function TrendChart({ initialData, partnerId, partnerIds }: Props) {
         <div>
           <CardTitle className="text-base">Doanh thu &amp; Hoa hồng theo tháng</CardTitle>
           <CardDescription>
-            {range === "ALL" ? "Toàn bộ lịch sử" : `${range} gần nhất`}
+            {displayRange === "ALL" ? "Toàn bộ lịch sử" : `${displayRange} gần nhất`}
           </CardDescription>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border bg-muted p-0.5">
-          {RANGES.map((r) => (
-            <button
-              key={r}
-              onClick={() => handleRangeChange(r)}
-              disabled={isPending}
-              className={[
-                "rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                r === range
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground disabled:opacity-50",
-              ].join(" ")}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
+        {showRangeControls && (
+          <div className="flex shrink-0 items-center gap-0.5 rounded-lg border bg-muted p-0.5">
+            {RANGES.map((r) => (
+              <button
+                key={r}
+                onClick={() => handleRangeChange(r)}
+                disabled={isPending}
+                className={[
+                  "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                  r === range
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground disabled:opacity-50",
+                ].join(" ")}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="h-64 w-full">
-        {data.length === 0 ? (
+        {displayData.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             {isPending ? "Đang tải..." : "Chưa có dữ liệu"}
           </div>
         ) : (
           <div className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>
             <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+              <AreaChart data={displayData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="grad-revenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="var(--chart-3)" stopOpacity={0.5} />

@@ -1,10 +1,18 @@
-"use server";
-
 import { getPool, sql } from "@/lib/db/sql";
 import { calcCommissionFromTotal } from "@/lib/commission";
 
 export type TrendRange = "1W" | "1M" | "3M" | "6M" | "1Y" | "2Y" | "ALL";
 export type TrendPoint = { period: string; revenue: number; commission: number };
+
+export function isTrendRange(value: string | undefined): value is TrendRange {
+  return value === "1W"
+    || value === "1M"
+    || value === "3M"
+    || value === "6M"
+    || value === "1Y"
+    || value === "2Y"
+    || value === "ALL";
+}
 
 function getSinceDays(range: TrendRange): number | null {
   switch (range) {
@@ -16,6 +24,11 @@ function getSinceDays(range: TrendRange): number | null {
     case "2Y":  return 730;
     case "ALL": return null;
   }
+}
+
+export function getTrendSinceDate(range: TrendRange): Date | null {
+  const days = getSinceDays(range);
+  return days !== null ? new Date(Date.now() - days * 86_400_000) : null;
 }
 
 function isDaily(range: TrendRange): boolean {
@@ -58,6 +71,7 @@ export async function getTrendSeriesForPartners(
 export async function getTrendSeries(
   partnerId: string | number | null,
   range: TrendRange,
+  activeOnly = false,
 ): Promise<TrendPoint[]> {
   try {
     const numPartnerId =
@@ -69,18 +83,29 @@ export async function getTrendSeries(
 
     const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
 
-    const days = getSinceDays(range);
-    const since = days !== null ? new Date(Date.now() - days * 86_400_000) : null;
+    const since = getTrendSinceDate(range);
 
     const pool = await getPool();
 
     type TrendRow = { Period: string; Revenue: number };
-    const res = await pool
-      .request()
-      .input("PartnerId", sql.Int,      validPartnerId)
-      .input("Since",     sql.DateTime, since)
-      .input("IsDaily",   sql.Bit,      isDaily(range) ? 1 : 0)
-      .execute<TrendRow>("usp_GetTrendSeries");
+    let res;
+    try {
+      res = await pool
+        .request()
+        .input("PartnerId", sql.Int, validPartnerId)
+        .input("Since", sql.DateTime, since)
+        .input("IsDaily", sql.Bit, isDaily(range) ? 1 : 0)
+        .input("ActiveOnly", sql.Bit, activeOnly ? 1 : 0)
+        .execute<TrendRow>("usp_GetTrendSeries");
+    } catch (err) {
+      console.warn("[getTrendSeries] Falling back to legacy usp_GetTrendSeries", err);
+      res = await pool
+        .request()
+        .input("PartnerId", sql.Int, validPartnerId)
+        .input("Since", sql.DateTime, since)
+        .input("IsDaily", sql.Bit, isDaily(range) ? 1 : 0)
+        .execute<TrendRow>("usp_GetTrendSeries");
+    }
 
     return res.recordset.map((r) => ({
       period: r.Period,

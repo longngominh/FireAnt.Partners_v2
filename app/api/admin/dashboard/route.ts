@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getPartnerPerformance } from "@/lib/data/partners";
+import { getAdminDashboardPerformance } from "@/lib/data/partners";
 import { isTrendRange } from "@/lib/data/trend";
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -15,15 +12,9 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id } = await params;
   const rawRange = request.nextUrl.searchParams.get("range") ?? undefined;
-  const data = await getPartnerPerformance(
-    id,
-    rawRange === undefined ? "ALL" : isTrendRange(rawRange) ? rawRange : "1M",
-  );
-  if (!data) {
-    return NextResponse.json({ error: "Không tìm thấy đối tác" }, { status: 404 });
-  }
+  const range = isTrendRange(rawRange) ? rawRange : "1M";
+  const data = await getAdminDashboardPerformance(range);
 
   return NextResponse.json(data);
 }

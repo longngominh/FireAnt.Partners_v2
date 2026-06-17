@@ -2,31 +2,24 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import {
-  ArrowLeftIcon,
-  TrendingUpIcon,
-  WalletIcon,
-  ClockIcon,
-  TicketIcon,
-  UsersIcon,
-  TargetIcon,
-} from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { HeroTile, KpiTile } from "@/components/features/dashboard/kpi-tile";
-import { TrendChart } from "@/components/features/dashboard/trend-chart";
+import { PartnerPerformancePanel } from "@/components/features/dashboard/partner-performance-panel";
 import { CouponTable } from "@/components/features/payment/coupon-table";
 import { FilterBar } from "@/components/features/payment/filter-bar";
 import { Pagination } from "@/components/shared/pagination";
 import { getPartnerPerformance } from "@/lib/data/partners";
+import { isTrendRange } from "@/lib/data/trend";
 import { listCoupons, type CouponStatus } from "@/lib/data/payment";
-import { formatVND, formatNumber } from "@/lib/utils/currency";
+import { formatNumber } from "@/lib/utils/currency";
 
 type SearchParams = Promise<{
   q?: string;
   status?: string;
   page?: string;
+  range?: string;
 }>;
 
 export async function generateMetadata({
@@ -51,10 +44,11 @@ export default async function PartnerDetailPage({
 
   const { id } = await params;
   const query = await searchParams;
-  const data = await getPartnerPerformance(id);
+  const range = isTrendRange(query.range) ? query.range : "1M";
+  const data = await getPartnerPerformance(id, range);
   if (!data) notFound();
 
-  const { partner, totalRevenue, totalCommission, couponCount, paidCount, pendingCount, customerCount, conversionRate, monthlyTrend } = data;
+  const { partner } = data;
   const page = Number(query.page ?? "1") || 1;
   const status = (query.status ?? "ALL") as CouponStatus | "ALL";
   const {
@@ -100,51 +94,22 @@ export default async function PartnerDetailPage({
         </div>
       </div>
 
-      <div className="grid auto-rows-fr grid-cols-2 gap-4 lg:grid-cols-4">
-        <HeroTile
-          label="Hoa hồng đối tác đã nhận"
-          value={formatVND(totalCommission)}
-          hint={`${paidCount}/${couponCount} coupon thanh toán`}
-          icon={<TrendingUpIcon className="size-5" />}
-          className="col-span-2 row-span-2 lg:col-span-2"
-        />
-        <KpiTile
-          label="Doanh thu"
-          value={formatVND(totalRevenue)}
-          accent="info"
-          icon={<WalletIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Đang chờ thanh toán"
-          value={formatNumber(pendingCount)}
-          accent="warning"
-          icon={<ClockIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Tổng link đã tạo"
-          value={formatNumber(couponCount)}
-          icon={<TicketIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Khách hàng"
-          value={formatNumber(customerCount)}
-          icon={<UsersIcon className="size-4" />}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <TrendChart
-          initialData={monthlyTrend.map((p) => ({ period: p.month, revenue: p.revenue, commission: p.commission }))}
-          partnerId={partner.id}
-        />
-        <KpiTile
-          label="Tỷ lệ thanh toán"
-          value={`${conversionRate.toFixed(1)}%`}
-          hint="Coupon đã thanh toán / coupon đã tạo"
-          accent="brand"
-          icon={<TargetIcon className="size-4" />}
-        />
-      </div>
+      <PartnerPerformancePanel
+        partnerId={partner.id}
+        initialRange={range}
+        initialData={{
+          totalRevenue: data.totalRevenue,
+          totalCommission: data.totalCommission,
+          couponCount: data.couponCount,
+          paidCount: data.paidCount,
+          pendingCount: data.pendingCount,
+          customerCount: data.customerCount,
+          conversionRate: data.conversionRate,
+          monthlyTrend: data.monthlyTrend,
+        }}
+        basePath={`/admin/partners/${partner.id}`}
+        searchParams={{ q: query.q, status: query.status }}
+      />
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
@@ -160,7 +125,7 @@ export default async function PartnerDetailPage({
           pageSize={pageSize}
           total={couponTotal}
           basePath={`/admin/partners/${partner.id}`}
-          searchParams={{ q: query.q, status: query.status }}
+          searchParams={{ q: query.q, status: query.status, range: range === "1M" ? undefined : range }}
         />
       </div>
     </div>

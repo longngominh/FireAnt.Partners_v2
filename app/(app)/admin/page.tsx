@@ -1,11 +1,5 @@
 import Link from "next/link";
-import {
-  TrendingUpIcon,
-  WalletIcon,
-  UsersIcon,
-  TicketIcon,
-  ExternalLinkIcon,
-} from "lucide-react";
+import { ExternalLinkIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { Card } from "@/components/ui/card";
@@ -18,28 +12,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { HeroTile, KpiTile } from "@/components/features/dashboard/kpi-tile";
-import { TrendChart } from "@/components/features/dashboard/trend-chart";
-import { listPartners } from "@/lib/data/partners";
-import { getTrendSeriesForPartners } from "@/lib/data/trend";
+import { AdminDashboardPerformancePanel } from "@/components/features/dashboard/admin-dashboard-performance-panel";
+import { getAdminDashboardPerformance, listPartners } from "@/lib/data/partners";
+import { isTrendRange } from "@/lib/data/trend";
 import { formatVND, formatNumber } from "@/lib/utils/currency";
 
 export const metadata = { title: "Dashboard" };
 
-export default async function AdminDashboardPage() {
+type SearchParams = Promise<{
+  range?: string;
+}>;
+
+export default async function AdminDashboardPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const session = await auth();
   if (session?.user.role !== "admin") redirect("/dashboard");
 
+  const query = await searchParams;
+  const range = isTrendRange(query.range) ? query.range : "1M";
   const partners = await listPartners();
   const activePartners = partners.filter((p) => p.isActive);
-  const activeIds = activePartners.map((p) => p.id);
-
-  const trendData = await getTrendSeriesForPartners(activeIds, "6M");
-
-  const totalRevenue = activePartners.reduce((s, p) => s + p.totalRevenue, 0);
-  const totalCommission = activePartners.reduce((s, p) => s + p.totalCommission, 0);
-  const totalCoupons = activePartners.reduce((s, p) => s + p.couponCount, 0);
-  const totalCustomers = activePartners.reduce((s, p) => s + p.customerCount, 0);
+  const performance = await getAdminDashboardPerformance(range);
 
   const ranked = [...activePartners].sort((a, b) => b.totalRevenue - a.totalRevenue);
 
@@ -52,40 +48,10 @@ export default async function AdminDashboardPage() {
         </p>
       </div>
 
-      <div className="grid auto-rows-fr grid-cols-2 gap-4 lg:grid-cols-4">
-        <HeroTile
-          label="Tổng hoa hồng đối tác"
-          value={formatVND(totalCommission)}
-          hint={`Từ ${formatVND(totalRevenue)} doanh thu`}
-          icon={<TrendingUpIcon className="size-5" />}
-          className="col-span-2 row-span-2 lg:col-span-2"
-        />
-        <KpiTile
-          label="Tổng doanh thu"
-          value={formatVND(totalRevenue)}
-          accent="info"
-          icon={<WalletIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Tổng khách hàng"
-          value={formatNumber(totalCustomers)}
-          icon={<UsersIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Tổng coupon"
-          value={formatNumber(totalCoupons)}
-          icon={<TicketIcon className="size-4" />}
-        />
-        <KpiTile
-          label="Đối tác hoạt động"
-          value={String(activePartners.length)}
-        />
-      </div>
-
-      <TrendChart
-        initialData={trendData}
-        partnerId={null}
-        partnerIds={activeIds}
+      <AdminDashboardPerformancePanel
+        initialRange={range}
+        initialData={performance}
+        basePath="/admin"
       />
 
       <div>
