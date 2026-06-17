@@ -4,6 +4,7 @@ import { listCoupons, createCoupon, type CouponStatus } from "@/lib/data/payment
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { createPaymentSchema } from "@/lib/validations/payment";
+import { createPartnerPaymentOrder } from "@/lib/payment/order-payment";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -71,22 +72,36 @@ export async function POST(request: NextRequest) {
     if (parsed.data.customerEmail?.trim()) {
       paymentUrl.searchParams.set("userName", parsed.data.customerEmail.trim());
     }
+    const paymentLink = paymentUrl.toString();
+
+    const paymentOrder = await createPartnerPaymentOrder({
+      packageId: parsed.data.packageId,
+      userName: parsed.data.customerEmail.trim(),
+      amount: parsed.data.amount,
+      couponCode: code,
+      note: parsed.data.note?.trim() || null,
+      staff: session.user.email?.trim() || session.user.id || "partner-api",
+    });
 
     await createCoupon({
       partnerId,
       code,
-      paymentLink: paymentUrl.toString(),
+      paymentLink,
+      packageId: parsed.data.packageId,
       userName: parsed.data.customerEmail?.trim() || null,
       note: parsed.data.note?.trim() || null,
     });
-
-    const qrDataUrl = await qrToDataUrl(shortLink);
 
     return NextResponse.json({
       ok: true,
       code,
       shortLink,
-      qrDataUrl,
+      paymentLink,
+      qrCodeUrl: paymentOrder.qrCodeUrl || await qrToDataUrl(paymentLink),
+      orderId: paymentOrder.orderId,
+      accountNumber: paymentOrder.accountNumber,
+      qrPending: paymentOrder.qrPending,
+      isMock: paymentOrder.isMock,
       orderAmount: parsed.data.amount,
       customerEmail: parsed.data.customerEmail?.trim() || null,
       note: parsed.data.note?.trim() || null,

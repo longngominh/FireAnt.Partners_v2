@@ -117,7 +117,7 @@ function mapPartner(r: PartnerRow): Partner {
     email: r.Email,
     name: r.Name ?? null,
     phone: r.PhoneNumber ?? null,
-    isActive: r.IsActive ?? false,
+    isActive: r.IsActive ?? true,
     underDiscountRate: underRate,
     aboveDiscountRate: aboveRate,
     revenueReference: ref,

@@ -17,6 +17,17 @@ import { qrToDataUrl } from "@/lib/utils/qr";
 import { StatusBadge } from "./status-badge";
 import type { Coupon } from "@/lib/data/payment";
 
+type PaymentQrResult = {
+  orderId: number;
+  qrCodeUrl: string;
+  accountNumber: string;
+  qrPending: boolean;
+  isMock: boolean;
+  fallbackToCheckout?: boolean;
+};
+
+class PaymentQrFatalError extends Error {}
+
 export function CouponRowActions({
   coupon,
   paymentLink,
@@ -25,7 +36,7 @@ export function CouponRowActions({
   paymentLink: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [paymentQr, setPaymentQr] = useState<PaymentQrResult | null>(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
 
   async function copyLink() {
@@ -39,13 +50,48 @@ export function CouponRowActions({
   }
 
   async function ensureQr() {
-    if (qrDataUrl) return qrDataUrl;
+    if (paymentQr?.qrCodeUrl) return paymentQr.qrCodeUrl;
 
     setIsGeneratingQr(true);
     try {
-      const nextQrDataUrl = await qrToDataUrl(paymentLink);
-      setQrDataUrl(nextQrDataUrl);
-      return nextQrDataUrl;
+      try {
+        const response = await fetch(`/api/coupons/${encodeURIComponent(coupon.code)}/payment-qr`);
+        const payload = await response.json();
+        if (!response.ok) {
+          if (payload.code === "ORDER_PAID") {
+            throw new PaymentQrFatalError(payload.error ?? "Đơn hàng đã thanh toán");
+          }
+
+          throw new Error(payload.error ?? "Không tạo được mã QR chuyển khoản");
+        }
+
+        if (payload.qrCodeUrl) {
+          setPaymentQr(payload);
+          return payload.qrCodeUrl as string;
+        }
+
+        const fallbackQrCodeUrl = await qrToDataUrl(paymentLink);
+        setPaymentQr({
+          ...payload,
+          qrCodeUrl: fallbackQrCodeUrl,
+          fallbackToCheckout: true,
+        });
+        return fallbackQrCodeUrl;
+      } catch (err) {
+        if (err instanceof PaymentQrFatalError) throw err;
+
+        console.warn("[payment-qr] fallback to checkout QR", err);
+        const fallbackQrCodeUrl = await qrToDataUrl(paymentLink);
+        setPaymentQr({
+          orderId: 0,
+          qrCodeUrl: fallbackQrCodeUrl,
+          accountNumber: "",
+          qrPending: false,
+          isMock: false,
+          fallbackToCheckout: true,
+        });
+        return fallbackQrCodeUrl;
+      }
     } finally {
       setIsGeneratingQr(false);
     }
@@ -55,8 +101,8 @@ export function CouponRowActions({
     setOpen(true);
     try {
       await ensureQr();
-    } catch {
-      toast.error("Không tạo được mã QR");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không tạo được mã QR");
     }
   }
 
@@ -64,8 +110,12 @@ export function CouponRowActions({
     let href: string;
     try {
       href = await ensureQr();
-    } catch {
-      toast.error("Không tạo được mã QR");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Không tạo được mã QR");
+      return;
+    }
+    if (!href) {
+      toast.warning("QR thanh toán chưa sẵn sàng");
       return;
     }
 
@@ -101,7 +151,7 @@ export function CouponRowActions({
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <code className="font-mono text-sm">{coupon.code}</code>
@@ -113,44 +163,66 @@ export function CouponRowActions({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col items-center gap-3 rounded-lg border bg-muted/30 p-4">
+          <div className="flex min-w-0 flex-col items-center gap-3 rounded-lg border bg-muted/30 p-3 sm:p-4">
             <div className="rounded-md bg-background p-2 shadow-sm">
-              {qrDataUrl ? (
+              {paymentQr?.qrCodeUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={qrDataUrl} alt="QR" className="size-40" />
+                <img
+                  src={paymentQr.qrCodeUrl}
+                  alt="QR thanh toán"
+                  className="size-40 sm:size-44"
+                />
               ) : (
-                <div className="flex size-40 items-center justify-center text-xs text-muted-foreground">
+                <div className="flex size-40 items-center justify-center text-xs text-muted-foreground sm:size-44">
                   {isGeneratingQr ? "Đang tạo QR..." : "Chưa có QR"}
                 </div>
               )}
             </div>
-            <code className="max-w-full truncate rounded bg-muted px-2 py-1 text-xs">
-              {paymentLink}
-            </code>
+            {paymentQr?.orderId && paymentQr.orderId > 0 ? (
+              <code className="rounded bg-muted px-2 py-1 text-xs">FA{paymentQr.orderId}</code>
+            ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-lg border bg-card p-3 text-center text-xs">
+          <div className="grid grid-cols-1 gap-2 rounded-lg border bg-card p-3 text-center text-xs sm:grid-cols-2">
             <Stat label="Gói" value={coupon.packageName ?? "—"} mono={false} />
             <Stat
               label="Số tiền"
               value={coupon.orderAmount > 0 ? formatVND(coupon.orderAmount) : "—"}
               accent="info"
             />
+            {paymentQr?.accountNumber ? (
+              <Stat label="Tài khoản nhận" value={paymentQr.accountNumber} />
+            ) : null}
           </div>
+          {paymentQr?.qrPending ? (
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+              OnePay tạm chưa trả QR chuyển khoản. QR hiện tại sẽ mở trang thanh toán để khách lấy QR tại checkout.
+            </div>
+          ) : null}
+          {paymentQr?.fallbackToCheckout && !paymentQr.qrPending ? (
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+              Đang dùng QR mở trang thanh toán vì chưa lấy được QR chuyển khoản trực tiếp.
+            </div>
+          ) : null}
+          {paymentQr?.isMock ? (
+            <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
+              OnePay đang ở mock mode. Cần cấu hình ONEPAY_MODE=real để dùng QR thật.
+            </div>
+          ) : null}
 
-          <DialogFooter className="flex-row sm:flex-row sm:space-x-2">
-            <Button variant="outline" onClick={copyCode} className="flex-1 gap-2">
+          <DialogFooter className="sm:space-x-2">
+            <Button variant="outline" onClick={copyCode} className="w-full gap-2 sm:flex-1">
               <CopyIcon className="size-4" /> Copy mã
             </Button>
             <Button
               variant="outline"
               onClick={downloadQR}
               disabled={isGeneratingQr}
-              className="flex-1 gap-2"
+              className="w-full gap-2 sm:flex-1"
             >
               <DownloadIcon className="size-4" /> QR
             </Button>
-            <Button onClick={copyLink} className="flex-1 gap-2">
+            <Button onClick={copyLink} className="w-full gap-2 sm:flex-1">
               <CopyIcon className="size-4" /> Copy link
             </Button>
           </DialogFooter>

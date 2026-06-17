@@ -7,6 +7,7 @@ import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
+import { createPartnerPaymentOrder } from "@/lib/payment/order-payment";
 
 import type { CreatePaymentState } from "@/lib/payment/types";
 
@@ -72,15 +73,23 @@ export async function createPaymentAction(
     }
     const paymentLink = paymentUrl.toString();
 
+    const paymentOrder = await createPartnerPaymentOrder({
+      packageId: parsed.data.packageId,
+      userName: parsed.data.customerEmail.trim(),
+      amount: parsed.data.amount,
+      couponCode: code,
+      note: parsed.data.note?.trim() || null,
+      staff: session.user.email?.trim() || session.user.id || "partner",
+    });
+
     await createCoupon({
       partnerId,
       code,
       paymentLink,
+      packageId: parsed.data.packageId,
       userName: parsed.data.customerEmail.trim() || null,
       note: parsed.data.note?.trim() || null,
     });
-
-    const qrDataUrl = await qrToDataUrl(paymentLink);
 
     revalidatePath("/payment");
     revalidatePath("/dashboard");
@@ -93,7 +102,11 @@ export async function createPaymentAction(
         code,
         shortLink,
         paymentLink,
-        qrDataUrl,
+        qrCodeUrl: paymentOrder.qrCodeUrl || await qrToDataUrl(paymentLink),
+        orderId: paymentOrder.orderId,
+        accountNumber: paymentOrder.accountNumber,
+        qrPending: paymentOrder.qrPending,
+        isMock: paymentOrder.isMock,
         orderAmount: parsed.data.amount,
         customerEmail: parsed.data.customerEmail?.trim() || null,
         note: parsed.data.note?.trim() || null,

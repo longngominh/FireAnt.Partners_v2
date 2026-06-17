@@ -15,13 +15,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatVND } from "@/lib/utils/currency";
 import { createPaymentAction } from "@/lib/payment/actions";
 import {
@@ -29,11 +22,9 @@ import {
   type CreatePaymentState,
 } from "@/lib/payment/types";
 import type { ServicePackage } from "@/lib/data/packages";
-import type { Partner } from "@/lib/data/partners";
 
 type Props = {
   packages: ServicePackage[];
-  partners?: Partner[];
 };
 
 const SERVICE_BADGE: Record<number, { label: string; color: string }> = {
@@ -42,7 +33,7 @@ const SERVICE_BADGE: Record<number, { label: string; color: string }> = {
   35: { label: "Cao cấp",        color: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300" },
 };
 
-export function CreatePaymentForm({ packages, partners = [] }: Props) {
+export function CreatePaymentForm({ packages }: Props) {
   const [state, action, pending] = useActionState<CreatePaymentState, FormData>(
     createPaymentAction,
     createPaymentInitialState,
@@ -68,9 +59,6 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
     services[0]?.serviceId ?? null,
   );
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
-  const [selectedPartnerId, setSelectedPartnerId] = useState<string>(
-    partners[0] ? String(partners[0].id) : "",
-  );
 
   const currentServicePackages = useMemo(
     () => services.find((s) => s.serviceId === selectedServiceId)?.packages ?? [],
@@ -114,60 +102,25 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
   }
 
   function downloadQR() {
-    if (!result) return;
+    if (!result?.qrCodeUrl) return;
     const a = document.createElement("a");
-    a.href = result.qrDataUrl;
+    a.href = result.qrCodeUrl;
     a.download = `qr-${result.code}.png`;
     a.click();
   }
 
-  const needsPartnerSelection = partners.length > 0;
-  const canSubmit = !!selectedPackage && !pending && (!needsPartnerSelection || !!selectedPartnerId);
+  const canSubmit = !!selectedPackage && !pending;
 
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_360px]">
       <form action={action} className="flex flex-col gap-4">
         {/* Hidden fields */}
-        {selectedPartnerId ? (
-          <input type="hidden" name="partnerId" value={selectedPartnerId} />
-        ) : null}
         {selectedPackage && (
           <>
             <input type="hidden" name="packageId" value={selectedPackage.packageId} />
             <input type="hidden" name="amount" value={Math.round(selectedPackage.amount)} />
           </>
         )}
-
-        {needsPartnerSelection ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Chọn đối tác</CardTitle>
-              <CardDescription>
-                Link thanh toán sẽ được ghi nhận cho đối tác được chọn.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Đối tác
-              </Label>
-              <Select value={selectedPartnerId} onValueChange={setSelectedPartnerId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Chọn đối tác" />
-                </SelectTrigger>
-                <SelectContent>
-                  {partners.map((partner) => (
-                    <SelectItem key={partner.id} value={String(partner.id)}>
-                      {partner.name ?? partner.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {state.fieldErrors?.partnerId ? (
-                <p className="text-xs text-destructive">{state.fieldErrors.partnerId[0]}</p>
-              ) : null}
-            </CardContent>
-          </Card>
-        ) : null}
 
         <Card>
           <CardHeader>
@@ -319,43 +272,71 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
 
       {/* Result dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Link thanh toán đã sẵn sàng</DialogTitle>
             <DialogDescription>
-              Chia sẻ link thanh toán hoặc QR cho khách hàng để hoàn tất thanh toán.
+              Chia sẻ QR chuyển khoản hoặc link thanh toán cho khách hàng.
             </DialogDescription>
           </DialogHeader>
 
           {result ? (
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col items-center gap-3 rounded-lg border bg-muted/30 p-4">
+              <div className="flex min-w-0 flex-col items-center gap-3 rounded-lg border bg-muted/30 p-3 sm:p-4">
                 <div className="rounded-md bg-background p-2 shadow-sm">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={result.qrDataUrl} alt="QR thanh toán" className="size-44" />
+                  {result.qrCodeUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={result.qrCodeUrl}
+                      alt="QR thanh toán"
+                      className="size-40 sm:size-44"
+                    />
+                  ) : (
+                    <div className="flex size-40 items-center justify-center text-center text-xs text-muted-foreground sm:size-44">
+                      QR thanh toán chưa sẵn sàng
+                    </div>
+                  )}
                 </div>
-                <code className="max-w-full truncate rounded bg-muted px-2 py-1 text-xs">
-                  {result.paymentLink}
-                </code>
+                {result.orderId ? (
+                  <code className="rounded bg-muted px-2 py-1 text-xs">
+                    FA{result.orderId}
+                  </code>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 gap-2 rounded-lg border bg-card p-3 text-center text-xs">
                 <Stat label="Giá gói" value={formatVND(result.orderAmount)} />
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
                 <div className="flex flex-col gap-0.5">
                   <span className="text-muted-foreground">Mã coupon</span>
                   <code className="font-mono font-medium">{result.code}</code>
                 </div>
+                {result.accountNumber ? (
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="text-muted-foreground">Tài khoản nhận</span>
+                    <span className="truncate font-mono font-medium">{result.accountNumber}</span>
+                  </div>
+                ) : null}
                 {result.customerEmail ? (
-                  <div className="flex flex-col gap-0.5">
+                  <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-muted-foreground">Tài khoản FireAnt</span>
                     <span className="truncate font-medium">{result.customerEmail}</span>
                   </div>
                 ) : null}
+                {result.qrPending ? (
+                  <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-warning sm:col-span-2">
+                    OnePay tạm chưa trả QR. Có thể dùng link thanh toán hoặc thử tạo lại sau.
+                  </div>
+                ) : null}
+                {result.isMock ? (
+                  <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-warning sm:col-span-2">
+                    OnePay đang ở mock mode. Cần cấu hình ONEPAY_MODE=real để dùng QR thật.
+                  </div>
+                ) : null}
                 {result.note ? (
-                  <div className="col-span-2 flex flex-col gap-0.5">
+                  <div className="flex flex-col gap-0.5 sm:col-span-2">
                     <span className="text-muted-foreground">Ghi chú</span>
                     <span className="font-medium">{result.note}</span>
                   </div>
@@ -364,14 +345,19 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
             </div>
           ) : null}
 
-          <DialogFooter className="flex-row sm:flex-row sm:justify-between sm:space-x-2">
-            <Button variant="outline" onClick={copyCode} className="flex-1 gap-2">
+          <DialogFooter className="sm:justify-between sm:space-x-2">
+            <Button variant="outline" onClick={copyCode} className="w-full gap-2 sm:flex-1">
               <CopyIcon className="size-4" /> Copy mã
             </Button>
-            <Button variant="outline" onClick={downloadQR} className="flex-1 gap-2">
+            <Button
+              variant="outline"
+              onClick={downloadQR}
+              disabled={!result?.qrCodeUrl}
+              className="w-full gap-2 sm:flex-1"
+            >
               <DownloadIcon className="size-4" /> QR
             </Button>
-            <Button onClick={copyLink} className="flex-1 gap-2">
+            <Button onClick={copyLink} className="w-full gap-2 sm:flex-1">
               <CopyIcon className="size-4" /> Copy link
             </Button>
           </DialogFooter>

@@ -149,6 +149,7 @@ export type CreateCouponInput = {
   partnerId: number | string;
   code: string;
   paymentLink: string;
+  packageId?: number | null;
   userName?: string | null;
   note?: string | null;
 };
@@ -175,6 +176,14 @@ export async function createCoupon(input: CreateCouponInput): Promise<{ id: numb
 
   const newId = res.recordset[0]?.CouponID;
   if (!newId) throw new Error("INSERT Coupons thất bại — không lấy được CouponID.");
+
+  if (input.packageId !== null && input.packageId !== undefined) {
+    await pool
+      .request()
+      .input("CouponID", sql.Int, newId)
+      .input("PackageId", sql.Int, input.packageId)
+      .query("UPDATE Coupons SET PackageId = @PackageId WHERE CouponID = @CouponID");
+  }
 
   return { id: newId, code: input.code };
 }
