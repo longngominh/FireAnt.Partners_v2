@@ -94,7 +94,6 @@ async function buildPaymentOrderResult(
 type ExistingOrderRow = {
   OrderID: number;
   Amount: number | null;
-  Fee: number | null;
   Status: number | null;
   IsPaid: boolean | null;
 };
@@ -110,7 +109,6 @@ async function getOrderByCouponCode(
       SELECT TOP (1)
         so.OrderID,
         pkg.Amount,
-        so.Fee,
         so.Status,
         so.IsPaid
       FROM [EStocks_Data].[dbo].[service_Orders] so
@@ -127,7 +125,7 @@ async function getOrderByCouponCode(
 
   return {
     orderId: row.OrderID,
-    amount: row.Amount ?? row.Fee ?? 0,
+    amount: row.Amount ?? 0,
     isPaid: row.Status === 1 || row.IsPaid === true,
   };
 }
