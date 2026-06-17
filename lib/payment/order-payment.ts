@@ -176,9 +176,10 @@ async function createOrderRecord(input: PartnerPaymentOrderInput): Promise<numbe
     .input("Staff", input.staff)
     .input("CouponCode", input.couponCode)
     .query<{ OrderID: number }>(`
+      DECLARE @lockResource NVARCHAR(255) = N'partner-payment-coupon:' + CONVERT(NVARCHAR(50), @CouponCode);
       DECLARE @lockResult INT;
       EXEC @lockResult = sp_getapplock
-        @Resource = CONCAT('partner-payment-coupon:', @CouponCode),
+        @Resource = @lockResource,
         @LockMode = 'Exclusive',
         @LockOwner = 'Session',
         @LockTimeout = 10000;
