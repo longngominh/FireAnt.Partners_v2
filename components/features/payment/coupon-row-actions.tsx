@@ -19,18 +19,18 @@ import type { Coupon } from "@/lib/data/payment";
 
 export function CouponRowActions({
   coupon,
-  shortLink,
+  paymentLink,
 }: {
   coupon: Coupon;
-  shortLink: string;
+  paymentLink: string;
 }) {
   const [open, setOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
 
   async function copyLink() {
-    await navigator.clipboard.writeText(shortLink);
-    toast.success("Đã copy link", { description: shortLink });
+    await navigator.clipboard.writeText(paymentLink);
+    toast.success("Đã copy link thanh toán", { description: paymentLink });
   }
 
   async function copyCode() {
@@ -43,7 +43,7 @@ export function CouponRowActions({
 
     setIsGeneratingQr(true);
     try {
-      const nextQrDataUrl = await qrToDataUrl(shortLink);
+      const nextQrDataUrl = await qrToDataUrl(paymentLink);
       setQrDataUrl(nextQrDataUrl);
       return nextQrDataUrl;
     } finally {
@@ -124,7 +124,9 @@ export function CouponRowActions({
                 </div>
               )}
             </div>
-            <code className="rounded bg-muted px-2 py-1 text-xs">{shortLink}</code>
+            <code className="max-w-full truncate rounded bg-muted px-2 py-1 text-xs">
+              {paymentLink}
+            </code>
           </div>
 
           <div className="grid grid-cols-2 gap-2 rounded-lg border bg-card p-3 text-center text-xs">

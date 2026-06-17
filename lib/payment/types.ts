@@ -5,6 +5,7 @@ export type CreatePaymentState = {
   result?: {
     code: string;
     shortLink: string;
+    paymentLink: string;
     qrDataUrl: string;
     orderAmount: number;
     customerEmail: string | null;

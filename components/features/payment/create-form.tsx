@@ -103,8 +103,8 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
 
   async function copyLink() {
     if (!result) return;
-    await navigator.clipboard.writeText(result.shortLink);
-    toast.success("Đã copy link");
+    await navigator.clipboard.writeText(result.paymentLink);
+    toast.success("Đã copy link thanh toán");
   }
 
   async function copyCode() {
@@ -323,7 +323,7 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
           <DialogHeader>
             <DialogTitle>Link thanh toán đã sẵn sàng</DialogTitle>
             <DialogDescription>
-              Chia sẻ link hoặc QR cho khách hàng để hoàn tất thanh toán.
+              Chia sẻ link thanh toán hoặc QR cho khách hàng để hoàn tất thanh toán.
             </DialogDescription>
           </DialogHeader>
 
@@ -334,7 +334,9 @@ export function CreatePaymentForm({ packages, partners = [] }: Props) {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={result.qrDataUrl} alt="QR thanh toán" className="size-44" />
                 </div>
-                <code className="rounded bg-muted px-2 py-1 text-xs">{result.shortLink}</code>
+                <code className="max-w-full truncate rounded bg-muted px-2 py-1 text-xs">
+                  {result.paymentLink}
+                </code>
               </div>
 
               <div className="grid grid-cols-1 gap-2 rounded-lg border bg-card p-3 text-center text-xs">

@@ -10,14 +10,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatVND } from "@/lib/utils/currency";
-import { buildShortLink } from "@/lib/utils/shortcode";
 import type { Coupon } from "@/lib/data/payment";
 import { StatusBadge } from "./status-badge";
 import { CouponRowActions } from "./coupon-row-actions";
 
 export function CouponTable({ rows }: { rows: Coupon[] }) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-
   if (rows.length === 0) {
     return (
       <Card className="flex flex-col items-center justify-center gap-2 border-dashed py-16 text-center">
@@ -45,10 +42,7 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((coupon) => {
-            const shortLink = buildShortLink(baseUrl, coupon.code);
-
-            return (
+          {rows.map((coupon) => (
             <TableRow key={coupon.id} className="group">
               <TableCell>
                 <div className="flex flex-col leading-tight">
@@ -84,12 +78,11 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
               <TableCell>
                 <CouponRowActions
                   coupon={coupon}
-                  shortLink={shortLink}
+                  paymentLink={coupon.paymentLink}
                 />
               </TableCell>
             </TableRow>
-            );
-          })}
+          ))}
         </TableBody>
       </Table>
       </div>

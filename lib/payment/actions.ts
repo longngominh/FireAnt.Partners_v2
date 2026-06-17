@@ -70,16 +70,17 @@ export async function createPaymentAction(
     if (parsed.data.customerEmail?.trim()) {
       paymentUrl.searchParams.set("userName", parsed.data.customerEmail.trim());
     }
+    const paymentLink = paymentUrl.toString();
 
     await createCoupon({
       partnerId,
       code,
-      paymentLink: paymentUrl.toString(),
+      paymentLink,
       userName: parsed.data.customerEmail.trim() || null,
       note: parsed.data.note?.trim() || null,
     });
 
-    const qrDataUrl = await qrToDataUrl(shortLink);
+    const qrDataUrl = await qrToDataUrl(paymentLink);
 
     revalidatePath("/payment");
     revalidatePath("/dashboard");
@@ -91,6 +92,7 @@ export async function createPaymentAction(
       result: {
         code,
         shortLink,
+        paymentLink,
         qrDataUrl,
         orderAmount: parsed.data.amount,
         customerEmail: parsed.data.customerEmail?.trim() || null,
