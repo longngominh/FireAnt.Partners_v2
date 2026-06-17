@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useTransition } from "react";
+import { useCallback, useEffect, useRef, useTransition } from "react";
 import { SearchIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,17 +28,49 @@ export function FilterBar() {
 
   const q = params.get("q") ?? "";
   const status = params.get("status") ?? "ALL";
+  const searchTimeoutRef = useRef<number | null>(null);
 
-  function update(next: Record<string, string | undefined>) {
+  const replaceSearchParams = useCallback((sp: URLSearchParams) => {
+    const queryString = sp.toString();
+
+    startTransition(() => {
+      router.replace(queryString ? `${pathname}?${queryString}` : pathname);
+    });
+  }, [pathname, router, startTransition]);
+
+  const update = useCallback((next: Record<string, string | undefined>) => {
     const sp = new URLSearchParams(params.toString());
     for (const [k, v] of Object.entries(next)) {
       if (!v || v === "ALL") sp.delete(k);
       else sp.set(k, v);
     }
     sp.delete("page");
-    startTransition(() => {
-      router.replace(`${pathname}?${sp.toString()}`);
-    });
+    replaceSearchParams(sp);
+  }, [params, replaceSearchParams]);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current !== null) {
+        window.clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function updateSearch(value: string) {
+    if (searchTimeoutRef.current !== null) {
+      window.clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = window.setTimeout(() => {
+      const normalizedValue = value.trim();
+      if (normalizedValue === q) return;
+
+      const sp = new URLSearchParams(window.location.search);
+      if (normalizedValue) sp.set("q", normalizedValue);
+      else sp.delete("q");
+      sp.delete("page");
+      replaceSearchParams(sp);
+    }, 400);
   }
 
   return (
@@ -46,9 +78,10 @@ export function FilterBar() {
       <div className="relative flex-1">
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
+          key={q}
           placeholder="Tìm theo mã, tên hoặc email khách hàng…"
           defaultValue={q}
-          onChange={(e) => update({ q: e.target.value })}
+          onChange={(e) => updateSearch(e.target.value)}
           className="pl-9"
         />
       </div>

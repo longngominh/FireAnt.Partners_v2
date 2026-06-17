@@ -13,19 +13,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatVND } from "@/lib/utils/currency";
+import { qrToDataUrl } from "@/lib/utils/qr";
 import { StatusBadge } from "./status-badge";
 import type { Coupon } from "@/lib/data/payment";
 
 export function CouponRowActions({
   coupon,
   shortLink,
-  qrDataUrl,
 }: {
   coupon: Coupon;
   shortLink: string;
-  qrDataUrl: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
 
   async function copyLink() {
     await navigator.clipboard.writeText(shortLink);
@@ -37,9 +38,39 @@ export function CouponRowActions({
     toast.success("Đã copy mã", { description: coupon.code });
   }
 
-  function downloadQR() {
+  async function ensureQr() {
+    if (qrDataUrl) return qrDataUrl;
+
+    setIsGeneratingQr(true);
+    try {
+      const nextQrDataUrl = await qrToDataUrl(shortLink);
+      setQrDataUrl(nextQrDataUrl);
+      return nextQrDataUrl;
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  }
+
+  async function openPreview() {
+    setOpen(true);
+    try {
+      await ensureQr();
+    } catch {
+      toast.error("Không tạo được mã QR");
+    }
+  }
+
+  async function downloadQR() {
+    let href: string;
+    try {
+      href = await ensureQr();
+    } catch {
+      toast.error("Không tạo được mã QR");
+      return;
+    }
+
     const a = document.createElement("a");
-    a.href = qrDataUrl;
+    a.href = href;
     a.download = `qr-${coupon.code}.png`;
     a.click();
   }
@@ -61,7 +92,7 @@ export function CouponRowActions({
           variant="ghost"
           size="icon"
           className="size-7"
-          onClick={() => setOpen(true)}
+          onClick={openPreview}
           title="Xem QR và chi tiết"
         >
           <EyeIcon className="size-3.5" />
@@ -84,8 +115,14 @@ export function CouponRowActions({
 
           <div className="flex flex-col items-center gap-3 rounded-lg border bg-muted/30 p-4">
             <div className="rounded-md bg-background p-2 shadow-sm">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={qrDataUrl} alt="QR" className="size-40" />
+              {qrDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={qrDataUrl} alt="QR" className="size-40" />
+              ) : (
+                <div className="flex size-40 items-center justify-center text-xs text-muted-foreground">
+                  {isGeneratingQr ? "Đang tạo QR..." : "Chưa có QR"}
+                </div>
+              )}
             </div>
             <code className="rounded bg-muted px-2 py-1 text-xs">{shortLink}</code>
           </div>
@@ -103,7 +140,12 @@ export function CouponRowActions({
             <Button variant="outline" onClick={copyCode} className="flex-1 gap-2">
               <CopyIcon className="size-4" /> Copy mã
             </Button>
-            <Button variant="outline" onClick={downloadQR} className="flex-1 gap-2">
+            <Button
+              variant="outline"
+              onClick={downloadQR}
+              disabled={isGeneratingQr}
+              className="flex-1 gap-2"
+            >
               <DownloadIcon className="size-4" /> QR
             </Button>
             <Button onClick={copyLink} className="flex-1 gap-2">

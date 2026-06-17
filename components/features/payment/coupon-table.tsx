@@ -11,21 +11,12 @@ import {
 } from "@/components/ui/table";
 import { formatVND } from "@/lib/utils/currency";
 import { buildShortLink } from "@/lib/utils/shortcode";
-import { qrToDataUrl } from "@/lib/utils/qr";
 import type { Coupon } from "@/lib/data/payment";
 import { StatusBadge } from "./status-badge";
 import { CouponRowActions } from "./coupon-row-actions";
 
-export async function CouponTable({ rows }: { rows: Coupon[] }) {
+export function CouponTable({ rows }: { rows: Coupon[] }) {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-
-  const enriched = await Promise.all(
-    rows.map(async (c) => {
-      const shortLink = buildShortLink(baseUrl, c.code);
-      const qrDataUrl = await qrToDataUrl(shortLink);
-      return { coupon: c, shortLink, qrDataUrl };
-    }),
-  );
 
   if (rows.length === 0) {
     return (
@@ -54,7 +45,10 @@ export async function CouponTable({ rows }: { rows: Coupon[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {enriched.map(({ coupon, shortLink, qrDataUrl }) => (
+          {rows.map((coupon) => {
+            const shortLink = buildShortLink(baseUrl, coupon.code);
+
+            return (
             <TableRow key={coupon.id} className="group">
               <TableCell>
                 <div className="flex flex-col leading-tight">
@@ -91,11 +85,11 @@ export async function CouponTable({ rows }: { rows: Coupon[] }) {
                 <CouponRowActions
                   coupon={coupon}
                   shortLink={shortLink}
-                  qrDataUrl={qrDataUrl}
                 />
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
       </div>
