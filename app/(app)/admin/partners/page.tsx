@@ -1,9 +1,6 @@
-import Link from "next/link";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import { ExternalLinkIcon } from "lucide-react";
 import { auth } from "@/auth";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -15,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { listPartners } from "@/lib/data/partners";
 import { formatVND, formatNumber } from "@/lib/utils/currency";
+import { PartnerDetailLink } from "./partner-detail-link";
 
 export const metadata = { title: "Quản lý đối tác" };
 
@@ -80,16 +78,7 @@ export default async function AdminPartnersPage() {
                   {p.createdAt ? format(p.createdAt, "MM/yyyy", { locale: vi }) : "—"}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    asChild
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 opacity-0 group-hover:opacity-100"
-                  >
-                    <Link href={`/admin/partners/${p.id}`} aria-label="Xem chi tiết">
-                      <ExternalLinkIcon className="size-3.5" />
-                    </Link>
-                  </Button>
+                  <PartnerDetailLink href={`/admin/partners/${p.id}`} />
                 </TableCell>
               </TableRow>
             ))}
