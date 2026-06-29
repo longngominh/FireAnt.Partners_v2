@@ -2,10 +2,11 @@ import Link from "next/link";
 import { ArrowLeftIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
-import { CreatePartnerForm } from "@/components/features/admin/create-partner-form";
+import { PartnerForm } from "@/components/features/admin/partner-form";
+import { createPartnerAction } from "@/lib/admin/actions";
 import { redirect } from "next/navigation";
 
-export const metadata = { title: "Tạo tài khoản đối tác" };
+export const metadata = { title: "Thêm cộng tác viên" };
 
 export default async function NewPartnerPage() {
   const session = await auth();
@@ -21,15 +22,12 @@ export default async function NewPartnerPage() {
         </Button>
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Tạo tài khoản đối tác
+            Thêm cộng tác viên
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Cấp tài khoản đăng nhập V2 cho một đối tác đã có sẵn trong hệ thống FireAnt.
-          </p>
         </div>
       </div>
 
-      <CreatePartnerForm />
+      <PartnerForm action={createPartnerAction} />
     </div>
   );
 }

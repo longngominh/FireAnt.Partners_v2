@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, PencilIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { PartnerPerformancePanel } from "@/components/features/dashboard/partner-performance-panel";
 import { CouponTable } from "@/components/features/payment/coupon-table";
 import { FilterBar } from "@/components/features/payment/filter-bar";
@@ -13,7 +14,7 @@ import { Pagination } from "@/components/shared/pagination";
 import { getPartnerPerformance } from "@/lib/data/partners";
 import { isTrendRange } from "@/lib/data/trend";
 import { listCoupons, type CouponStatus } from "@/lib/data/payment";
-import { formatNumber } from "@/lib/utils/currency";
+import { formatNumber, formatVND } from "@/lib/utils/currency";
 
 type SearchParams = Promise<{
   q?: string;
@@ -81,18 +82,55 @@ export default async function PartnerDetailPage({
                 : ""}
             </p>
           </div>
-          <Badge
-            variant="outline"
-            className={
-              partner.isActive
-                ? "border-success/30 bg-success/15 text-success"
-                : "border-muted-foreground/30 bg-muted text-muted-foreground"
-            }
-          >
-            {partner.isActive ? "Đang hoạt động" : "Tạm dừng"}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{partner.partnerTypeLabel}</Badge>
+            <Badge
+              variant="outline"
+              className={
+                partner.isActive
+                  ? "border-success/30 bg-success/15 text-success"
+                  : "border-muted-foreground/30 bg-muted text-muted-foreground"
+              }
+            >
+              {partner.isActive ? "Đang hoạt động" : "Tạm dừng"}
+            </Badge>
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/admin/partners/${partner.id}/edit`}>
+                <PencilIcon className="size-3.5" /> Sửa
+              </Link>
+            </Button>
+          </div>
         </div>
       </div>
+
+      <Card className="grid gap-4 p-5 md:grid-cols-4">
+        <div>
+          <p className="text-xs text-muted-foreground">Thù lao tháng này</p>
+          <p className="num mt-1 text-xl font-semibold">
+            {formatVND(data.monthlyRemuneration.total)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Doanh thu tháng</p>
+          <p className="num mt-1 text-lg font-semibold">
+            {formatVND(data.monthlyRemuneration.revenue)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Lương cứng</p>
+          <p className="num mt-1 text-lg font-semibold">
+            {formatVND(data.monthlyRemuneration.baseSalary)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Hoa hồng + thưởng</p>
+          <p className="num mt-1 text-lg font-semibold">
+            {formatVND(
+              data.monthlyRemuneration.commission + data.monthlyRemuneration.performanceBonus,
+            )}
+          </p>
+        </div>
+      </Card>
 
       <PartnerPerformancePanel
         partnerId={partner.id}
@@ -105,6 +143,7 @@ export default async function PartnerDetailPage({
           pendingCount: data.pendingCount,
           customerCount: data.customerCount,
           conversionRate: data.conversionRate,
+          monthlyRemuneration: data.monthlyRemuneration,
           monthlyTrend: data.monthlyTrend,
         }}
         basePath={`/admin/partners/${partner.id}`}

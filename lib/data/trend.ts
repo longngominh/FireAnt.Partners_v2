@@ -1,5 +1,5 @@
 import { getPool, sql } from "@/lib/db/sql";
-import { calcCommissionFromTotal } from "@/lib/commission";
+import { calcCommissionFromTotal, type PartnerType } from "@/lib/commission";
 
 export type TrendRange = "1W" | "1M" | "3M" | "6M" | "1Y" | "2Y" | "ALL";
 export type TrendPoint = { period: string; revenue: number; commission: number };
@@ -72,6 +72,7 @@ export async function getTrendSeries(
   partnerId: string | number | null,
   range: TrendRange,
   activeOnly = false,
+  partnerType: PartnerType = "sales_employee",
 ): Promise<TrendPoint[]> {
   try {
     const numPartnerId =
@@ -110,7 +111,7 @@ export async function getTrendSeries(
     return res.recordset.map((r) => ({
       period: r.Period,
       revenue: r.Revenue,
-      commission: calcCommissionFromTotal(r.Revenue),
+      commission: calcCommissionFromTotal(r.Revenue, partnerType),
     }));
   } catch (err) {
     console.error("[getTrendSeries]", err);

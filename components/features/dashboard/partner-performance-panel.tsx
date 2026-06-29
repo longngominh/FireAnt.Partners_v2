@@ -26,6 +26,7 @@ type PanelData = Pick<
   | "pendingCount"
   | "customerCount"
   | "conversionRate"
+  | "monthlyRemuneration"
   | "monthlyTrend"
 >;
 
@@ -107,7 +108,7 @@ export function PartnerPerformancePanel({
       <div className={contentClassName}>
         <div className="grid auto-rows-fr grid-cols-2 gap-4 lg:grid-cols-4">
           <HeroTile
-            label="Hoa hồng đối tác đã nhận"
+            label="Hoa hồng theo khoảng lọc"
             value={formatVND(data.totalCommission)}
             hint={`${data.paidCount}/${data.couponCount} coupon thanh toán`}
             icon={<TrendingUpIcon className="size-5" />}
@@ -120,8 +121,8 @@ export function PartnerPerformancePanel({
             icon={<WalletIcon className="size-4" />}
           />
           <KpiTile
-            label="Đang chờ thanh toán"
-            value={formatNumber(data.pendingCount)}
+            label="Thù lao tháng này"
+            value={formatVND(data.monthlyRemuneration.total)}
             accent="warning"
             icon={<ClockIcon className="size-4" />}
           />

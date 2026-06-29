@@ -1,5 +1,12 @@
 import { getPool, sql } from "@/lib/db/sql";
-import { calcCommissionFromTotal } from "@/lib/commission";
+import {
+  calcCommissionFromTotal,
+  calcMonthlyRemuneration,
+  normalizePartnerType,
+  PARTNER_TYPE_LABELS,
+  type PartnerType,
+  type RemunerationBreakdown,
+} from "@/lib/commission";
 import { getTrendSeries, getTrendSinceDate, type TrendRange } from "@/lib/data/trend";
 
 export type Partner = {
@@ -9,12 +16,16 @@ export type Partner = {
   name: string | null;
   phone: string | null;
   isActive: boolean;
+  partnerType: PartnerType;
+  partnerTypeLabel: string;
   underDiscountRate: number;
   aboveDiscountRate: number;
   revenueReference: number;
   // Aggregate stats (populated in listPartners, null in getPartner)
   totalRevenue: number;
   totalCommission: number;
+  monthlyRevenue: number;
+  monthlyRemuneration: RemunerationBreakdown;
   customerCount: number;
   couponCount: number;
   createdAt: Date | null;
@@ -29,6 +40,7 @@ export type PartnerPerformance = {
   pendingCount: number;
   customerCount: number;
   conversionRate: number;
+  monthlyRemuneration: RemunerationBreakdown;
   monthlyTrend: Array<{ month: string; revenue: number; commission: number }>;
 };
 
@@ -50,11 +62,13 @@ type PartnerRow = {
   Name: string | null;
   PhoneNumber: string | null;
   IsActive: boolean | number | null;
+  PartnerType?: string | null;
   UnderDiscountRate: number | null;
   AboveDiscountRate: number | null;
   RevenueReference: number | null;
   TotalRevenue?: number;
   TotalCommission?: number;
+  MonthlyRevenue?: number;
   CustomerCount?: number;
   CouponCount?: number;
   CreatedDate?: Date | null;
@@ -75,6 +89,14 @@ const EMPTY_STATS: PartnerStatsRow = {
   TotalRevenue: 0,
   CustomerCount: 0,
 };
+
+function currentMonthRange(): { start: Date; end: Date } {
+  const now = new Date();
+  return {
+    start: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
+    end: new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0),
+  };
+}
 
 async function getPartnerStats(
   pool: Awaited<ReturnType<typeof getPool>>,
@@ -108,8 +130,10 @@ function mapPartner(r: PartnerRow): Partner {
   const aboveRate = r.AboveDiscountRate ?? 0;
   const ref = r.RevenueReference ?? 0;
   const rev = r.TotalRevenue ?? 0;
+  const monthlyRevenue = r.MonthlyRevenue ?? 0;
+  const partnerType = normalizePartnerType(r.PartnerType);
 
-  const commission = r.TotalCommission ?? calcCommissionFromTotal(rev);
+  const commission = r.TotalCommission ?? calcCommissionFromTotal(rev, partnerType);
 
   return {
     id: r.PartnerId,
@@ -118,15 +142,55 @@ function mapPartner(r: PartnerRow): Partner {
     name: r.Name ?? null,
     phone: r.PhoneNumber ?? null,
     isActive: r.IsActive === true || r.IsActive === 1,
+    partnerType,
+    partnerTypeLabel: PARTNER_TYPE_LABELS[partnerType],
     underDiscountRate: underRate,
     aboveDiscountRate: aboveRate,
     revenueReference: ref,
     totalRevenue: rev,
     totalCommission: commission,
+    monthlyRevenue,
+    monthlyRemuneration: calcMonthlyRemuneration(monthlyRevenue, partnerType),
     customerCount: r.CustomerCount ?? 0,
     couponCount: r.CouponCount ?? 0,
     createdAt: r.CreatedDate ?? null,
   };
+}
+
+async function getPartnerMonthlyRevenue(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  partnerId: number,
+): Promise<number> {
+  const { start, end } = currentMonthRange();
+  const res = await pool
+    .request()
+    .input("PartnerId", sql.Int, partnerId)
+    .input("StartDate", sql.DateTime, start)
+    .input("EndDate", sql.DateTime, end)
+    .query<{ MonthlyRevenue: number }>(`
+      WITH PaidOrderIds AS (
+        SELECT
+          cp.CouponID,
+          MAX(so.OrderID) AS OrderID
+        FROM Coupons cp
+        INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
+          ON so.CouponCode = cp.CouponCode
+         AND so.Status = 1
+        WHERE cp.PartnerId = @PartnerId
+          AND cp.IsUsed = 1
+        GROUP BY cp.CouponID
+      )
+      SELECT ISNULL(SUM(pkg.Amount), 0) AS MonthlyRevenue
+      FROM Coupons cp
+      INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
+      INNER JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.OrderID = poi.OrderID
+      LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID = pkg.PackageID
+      WHERE cp.PartnerId = @PartnerId
+        AND o.OrderDate >= @StartDate
+        AND o.OrderDate < @EndDate;
+    `);
+
+  return res.recordset[0]?.MonthlyRevenue ?? 0;
 }
 
 export async function listPartners(): Promise<Partner[]> {
@@ -169,16 +233,17 @@ export async function getPartnerPerformance(
     if (!partner) return null;
 
     const since = getTrendSinceDate(range);
-    const trendPromise = getTrendSeries(numId, range);
 
-    const [statsRes, trendSeries] = await Promise.all([
+    const [statsRes, trendSeries, monthlyRevenue] = await Promise.all([
       getPartnerStats(pool, numId, since, false),
-      trendPromise,
+      getTrendSeries(numId, range, false, partner.partnerType),
+      getPartnerMonthlyRevenue(pool, numId),
     ]);
 
     const s = statsRes;
 
-    const totalCommission = calcCommissionFromTotal(s.TotalRevenue);
+    const totalCommission = calcCommissionFromTotal(s.TotalRevenue, partner.partnerType);
+    const monthlyRemuneration = calcMonthlyRemuneration(monthlyRevenue, partner.partnerType);
 
     const monthlyTrend = trendSeries.map((p) => ({
       month: p.period,
@@ -195,6 +260,7 @@ export async function getPartnerPerformance(
       pendingCount: s.PendingCoupons,
       customerCount: s.CustomerCount,
       conversionRate: s.TotalCoupons > 0 ? (s.PaidCoupons / s.TotalCoupons) * 100 : 0,
+      monthlyRemuneration,
       monthlyTrend,
     };
   } catch (err) {
@@ -208,30 +274,61 @@ export async function getAdminDashboardPerformance(
 ): Promise<AdminDashboardPerformance> {
   try {
     const [pool, partners] = await Promise.all([getPool(), listPartners()]);
-    const activePartnerCount = partners.filter((p) => p.isActive).length;
+    const activePartners = partners.filter((p) => p.isActive);
+    const activePartnerCount = activePartners.length;
     const since = getTrendSinceDate(range);
-    const trendPromise = getTrendSeries(null, range, true);
 
-    const [statsRes, trendSeries] = await Promise.all([
+    const partnerStatsPromise = Promise.all(
+      activePartners.map(async (partner) => {
+        const stats = await getPartnerStats(pool, partner.id, since, false);
+        return {
+          partner,
+          commission: calcCommissionFromTotal(stats.TotalRevenue, partner.partnerType),
+        };
+      }),
+    );
+
+    const partnerTrendPromise = Promise.all(
+      activePartners.map((partner) =>
+        getTrendSeries(partner.id, range, false, partner.partnerType),
+      ),
+    );
+
+    const [statsRes, partnerStats, partnerTrendSeries] = await Promise.all([
       getPartnerStats(pool, null, since, true),
-      trendPromise,
+      partnerStatsPromise,
+      partnerTrendPromise,
     ]);
 
     const stats = statsRes;
+    const trendByPeriod = new Map<string, { month: string; revenue: number; commission: number }>();
+    for (const series of partnerTrendSeries) {
+      for (const point of series) {
+        const existing = trendByPeriod.get(point.period);
+        if (existing) {
+          existing.revenue += point.revenue;
+          existing.commission += point.commission;
+        } else {
+          trendByPeriod.set(point.period, {
+            month: point.period,
+            revenue: point.revenue,
+            commission: point.commission,
+          });
+        }
+      }
+    }
 
     return {
       totalRevenue: stats.TotalRevenue,
-      totalCommission: calcCommissionFromTotal(stats.TotalRevenue),
+      totalCommission: partnerStats.reduce((sum, p) => sum + p.commission, 0),
       couponCount: stats.TotalCoupons,
       paidCount: stats.PaidCoupons,
       pendingCount: stats.PendingCoupons,
       customerCount: stats.CustomerCount,
       activePartnerCount,
-      monthlyTrend: trendSeries.map((p) => ({
-        month: p.period,
-        revenue: p.revenue,
-        commission: p.commission,
-      })),
+      monthlyTrend: Array.from(trendByPeriod.values()).sort((a, b) =>
+        a.month.localeCompare(b.month),
+      ),
     };
   } catch (err) {
     console.error("[getAdminDashboardPerformance]", err);

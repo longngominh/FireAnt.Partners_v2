@@ -28,7 +28,7 @@ const partnerNav: NavItem[] = [
 
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
-  { href: "/admin/partners", label: "Quản lý đối tác", icon: ShieldIcon },
+  { href: "/admin/partners", label: "Quản lý CTV", icon: ShieldIcon },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean): boolean {

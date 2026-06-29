@@ -8,6 +8,7 @@ BEGIN
     p.PartnerId,
     i.UserName, i.Email, i.Name, i.PhoneNumber,
     p.IsActive,
+    p.PartnerType,
     p.CreatedDate,
     po.UnderDiscountRate, po.AboveDiscountRate, po.RevenueReference
   FROM   Partners p
