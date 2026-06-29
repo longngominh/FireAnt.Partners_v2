@@ -36,7 +36,7 @@ export default async function EditPartnerPage({
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-tight">Sửa cộng tác viên</h1>
             <p className="text-sm text-muted-foreground">
-              Cập nhật loại thù lao, trạng thái và UserName IS4 cho {partner.name ?? partner.email}.
+              Cập nhật thông tin cho {partner.name ?? partner.email}.
             </p>
           </div>
           <DeletePartnerButton partnerId={partner.id} />
