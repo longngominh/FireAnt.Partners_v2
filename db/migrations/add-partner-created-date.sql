@@ -8,5 +8,5 @@ ALTER TABLE Partners
 UPDATE p
 SET    p.CreatedDate = i.CreatedOnUtc
 FROM   Partners p
-INNER JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers i ON i.Id = p.UserId
+INNER JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers i ON i.UserName = p.UserName
 WHERE  p.CreatedDate IS NULL;

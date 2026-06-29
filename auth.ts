@@ -85,6 +85,35 @@ function hasAdminRole(roles: string | string[] | undefined): boolean {
   return adminRoles.has(roles);
 }
 
+function isGuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+async function getAvatarUserIdFromUserInfo(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${is4BaseUrl}/connect/userinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+
+    const profile = (await res.json()) as Partial<IS4Profile>;
+    return isGuid(profile.sub) ? profile.sub : null;
+  } catch (err) {
+    console.warn("[auth] getAvatarUserIdFromUserInfo failed", err);
+    return null;
+  }
+}
+
+function getAvatarUserId(tokenAvatarUserId: unknown, tokenSub: unknown): string | null {
+  if (isGuid(tokenAvatarUserId)) return tokenAvatarUserId;
+  if (isGuid(tokenSub)) return tokenSub;
+  return null;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   providers: [IdentityServer4],
@@ -116,6 +145,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.accessToken = account.access_token;
 
         const p = profile as IS4Profile | undefined;
+        token.avatarUserId = p?.sub ?? token.sub ?? null;
 
         // Admin IS4 vẫn giữ quyền admin, nhưng nếu cũng là partner thì giữ partnerId
         // để dùng các chức năng tạo link của partner.
@@ -140,6 +170,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }
         }
       }
+
+      if (
+        (!isGuid(token.avatarUserId) || token.avatarUserId === token.sub) &&
+        typeof token.accessToken === "string"
+      ) {
+        token.avatarUserId = await getAvatarUserIdFromUserInfo(token.accessToken);
+      }
+
       return token;
     },
 
@@ -149,6 +187,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.role = (token.role as string) ?? "partner";
         session.user.partnerId = (token.partnerId as string | null) ?? null;
         session.user.userId = (token.userId as string | null) ?? null;
+        session.user.avatarUserId = getAvatarUserId(token.avatarUserId, token.sub);
         session.accessToken = token.accessToken as string | undefined;
       }
       return session;

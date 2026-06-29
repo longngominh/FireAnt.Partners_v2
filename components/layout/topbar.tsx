@@ -5,12 +5,12 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 export function Topbar({
   email,
   role,
-  userId,
+  avatarUserId,
   title,
 }: {
   email: string;
   role: string;
-  userId?: string;
+  avatarUserId?: string;
   title?: string;
 }) {
   return (
@@ -23,7 +23,7 @@ export function Topbar({
       </div>
       <div className="flex items-center gap-1">
         <ThemeToggle />
-        <UserMenu email={email} role={role} userId={userId} />
+        <UserMenu email={email} role={role} avatarUserId={avatarUserId} />
       </div>
     </header>
   );

@@ -1,5 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 
+const COOKIE_PREFIX = "fireant-partners";
+
 export const authConfig = {
   pages: {
     signIn: "/login",
@@ -13,27 +15,27 @@ export const authConfig = {
   // (HTTPS vẫn được IIS đảm bảo ở lớp ngoài).
   cookies: {
     sessionToken: {
-      name: "authjs.session-token",
+      name: `${COOKIE_PREFIX}.session-token`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
     callbackUrl: {
-      name: "authjs.callback-url",
+      name: `${COOKIE_PREFIX}.callback-url`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
     csrfToken: {
-      name: "authjs.csrf-token",
+      name: `${COOKIE_PREFIX}.csrf-token`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
     pkceCodeVerifier: {
-      name: "authjs.pkce.code_verifier",
+      name: `${COOKIE_PREFIX}.pkce.code_verifier`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
     state: {
-      name: "authjs.state",
+      name: `${COOKIE_PREFIX}.state`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
     nonce: {
-      name: "authjs.nonce",
+      name: `${COOKIE_PREFIX}.nonce`,
       options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: false },
     },
   },

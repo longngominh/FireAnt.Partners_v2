@@ -49,7 +49,7 @@ type PartnerRow = {
   Email: string;
   Name: string | null;
   PhoneNumber: string | null;
-  IsActive: boolean | null;
+  IsActive: boolean | number | null;
   UnderDiscountRate: number | null;
   AboveDiscountRate: number | null;
   RevenueReference: number | null;
@@ -117,7 +117,7 @@ function mapPartner(r: PartnerRow): Partner {
     email: r.Email,
     name: r.Name ?? null,
     phone: r.PhoneNumber ?? null,
-    isActive: r.IsActive ?? true,
+    isActive: r.IsActive === true || r.IsActive === 1,
     underDiscountRate: underRate,
     aboveDiscountRate: aboveRate,
     revenueReference: ref,

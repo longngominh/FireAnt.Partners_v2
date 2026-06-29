@@ -8,6 +8,7 @@ declare module "next-auth" {
       role: string;
       partnerId: string | null;
       userId: string | null;
+      avatarUserId: string | null;
     } & DefaultSession["user"];
   }
 }
@@ -18,5 +19,6 @@ declare module "next-auth/jwt" {
     role?: string;
     partnerId?: string | null;
     userId?: string | null;
+    avatarUserId?: string | null;
   }
 }

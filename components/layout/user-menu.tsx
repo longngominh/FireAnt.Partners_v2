@@ -17,15 +17,15 @@ import {
 export function UserMenu({
   email,
   role,
-  userId,
+  avatarUserId,
 }: {
   email: string;
   role: string;
-  userId?: string;
+  avatarUserId?: string;
 }) {
   const initials = email.slice(0, 2).toUpperCase();
-  const avatarUrl = userId
-    ? `https://static.fireant.vn/users/avatar/${userId}?width=65&height=65`
+  const avatarUrl = avatarUserId
+    ? `https://static.fireant.vn/users/avatar/${encodeURIComponent(avatarUserId)}?width=65&height=65`
     : undefined;
   return (
     <DropdownMenu>
