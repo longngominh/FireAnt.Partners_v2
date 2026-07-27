@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { normalizePartnerType } from "@/lib/commission";
+import {
+  isMissingPaymentColumns,
+  PAYMENT_INFO_MIGRATION_HINT,
+} from "@/lib/data/partner-payment-info";
 import { getPool, sql } from "@/lib/db/sql";
 
 export type PartnerFormState = {
@@ -18,6 +22,15 @@ function getFormString(formData: FormData, key: string): string {
 
 function getFormBoolean(formData: FormData, key: string): boolean {
   return formData.get(key) === "on" || formData.get(key) === "true";
+}
+
+function getFormNullableString(formData: FormData, key: string): string | null {
+  return getFormString(formData, key) || null;
+}
+
+function describeError(err: unknown): string {
+  if (isMissingPaymentColumns(err)) return PAYMENT_INFO_MIGRATION_HINT;
+  return err instanceof Error ? err.message : "Lỗi không xác định.";
 }
 
 async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -93,6 +106,9 @@ export async function createPartnerAction(
   const username = getFormString(formData, "username");
   const partnerType = normalizePartnerType(getFormString(formData, "partnerType"));
   const isActive = getFormBoolean(formData, "isActive");
+  const fullName = getFormNullableString(formData, "fullName");
+  const bankAccountNumber = getFormNullableString(formData, "bankAccountNumber");
+  const bankName = getFormNullableString(formData, "bankName");
 
   if (!username) {
     return { ok: false, error: "Vui lòng nhập UserName của tài khoản IS4." };
@@ -112,15 +128,20 @@ export async function createPartnerAction(
       .input("UserName", sql.NVarChar(256), username)
       .input("PartnerType", sql.NVarChar(32), partnerType)
       .input("IsActive", sql.Bit, isActive ? 1 : 0)
+      .input("FullName", sql.NVarChar(200), fullName)
+      .input("BankAccountNumber", sql.NVarChar(50), bankAccountNumber)
+      .input("BankName", sql.NVarChar(100), bankName)
       .query(`
-        INSERT INTO Partners (UserName, PartnerType, IsActive, CreatedDate)
-        VALUES (@UserName, @PartnerType, @IsActive, GETDATE());
+        INSERT INTO Partners
+          (UserName, PartnerType, IsActive, CreatedDate, FullName, BankAccountNumber, BankName)
+        VALUES
+          (@UserName, @PartnerType, @IsActive, GETDATE(), @FullName, @BankAccountNumber, @BankName);
       `);
 
     revalidatePath("/admin/partners");
     return { ok: true, message: "Đã thêm cộng tác viên." };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi không xác định." };
+    return { ok: false, error: describeError(err) };
   }
 }
 
@@ -135,6 +156,9 @@ export async function updatePartnerAction(
   const username = getFormString(formData, "username");
   const partnerType = normalizePartnerType(getFormString(formData, "partnerType"));
   const isActive = getFormBoolean(formData, "isActive");
+  const fullName = getFormNullableString(formData, "fullName");
+  const bankAccountNumber = getFormNullableString(formData, "bankAccountNumber");
+  const bankName = getFormNullableString(formData, "bankName");
 
   if (!username) {
     return { ok: false, error: "Vui lòng nhập UserName của tài khoản IS4." };
@@ -155,11 +179,17 @@ export async function updatePartnerAction(
       .input("UserName", sql.NVarChar(256), username)
       .input("PartnerType", sql.NVarChar(32), partnerType)
       .input("IsActive", sql.Bit, isActive ? 1 : 0)
+      .input("FullName", sql.NVarChar(200), fullName)
+      .input("BankAccountNumber", sql.NVarChar(50), bankAccountNumber)
+      .input("BankName", sql.NVarChar(100), bankName)
       .query(`
         UPDATE Partners
         SET UserName = @UserName,
             PartnerType = @PartnerType,
-            IsActive = @IsActive
+            IsActive = @IsActive,
+            FullName = @FullName,
+            BankAccountNumber = @BankAccountNumber,
+            BankName = @BankName
         WHERE PartnerId = @PartnerId;
       `);
 
@@ -169,9 +199,10 @@ export async function updatePartnerAction(
 
     revalidatePath("/admin/partners");
     revalidatePath(`/admin/partners/${partnerId}`);
+    revalidatePath("/admin/revenue");
     return { ok: true, message: "Đã cập nhật cộng tác viên." };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi không xác định." };
+    return { ok: false, error: describeError(err) };
   }
 }
 

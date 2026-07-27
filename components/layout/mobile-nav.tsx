@@ -11,6 +11,7 @@ import {
   TicketIcon,
   UsersIcon,
   ShieldIcon,
+  WalletIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -34,11 +35,13 @@ const partnerNav: NavItem[] = [
   { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
   { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
   { href: "/customers", label: "Khách hàng", icon: UsersIcon },
+  { href: "/revenue", label: "Doanh thu & hoa hồng", icon: WalletIcon },
 ];
 
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
   { href: "/admin/partners", label: "Quản lý CTV", icon: ShieldIcon },
+  { href: "/admin/revenue", label: "Doanh thu & hoa hồng", icon: WalletIcon },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean): boolean {

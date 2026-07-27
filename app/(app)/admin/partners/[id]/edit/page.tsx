@@ -7,6 +7,7 @@ import { DeletePartnerButton } from "@/components/features/admin/delete-partner-
 import { Button } from "@/components/ui/button";
 import { updatePartnerAction } from "@/lib/admin/actions";
 import { getPartner } from "@/lib/data/partners";
+import { getPartnerPaymentInfo } from "@/lib/data/partner-payment-info";
 
 export const metadata = { title: "Sửa cộng tác viên" };
 
@@ -22,6 +23,7 @@ export default async function EditPartnerPage({
   const partner = await getPartner(id);
   if (!partner) notFound();
 
+  const paymentInfo = await getPartnerPaymentInfo(partner.id);
   const action = updatePartnerAction.bind(null, partner.id);
 
   return (
@@ -43,7 +45,7 @@ export default async function EditPartnerPage({
         </div>
       </div>
 
-      <PartnerForm action={action} partner={partner} />
+      <PartnerForm action={action} partner={partner} paymentInfo={paymentInfo} />
     </div>
   );
 }

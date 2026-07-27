@@ -6,7 +6,9 @@ const nextConfig: NextConfig = {
   // (TYPES.Int, TYPES.NVarChar, ...) sẽ khác với instance nội bộ của tedious,
   // khiến parameterized queries ném lỗi "parameter.type.validate is not a function".
   // Giải pháp: khai báo external để Next.js dùng Node.js require() trực tiếp.
-  serverExternalPackages: ["mssql", "tedious"],
+  // exceljs là CJS và kéo theo các Node built-in (fs/stream/zlib) — để external
+  // cho bundler khỏi phải polyfill.
+  serverExternalPackages: ["mssql", "tedious", "exceljs"],
 
   // Chạy sau IIS reverse proxy: IIS rewrite URL về http://localhost:8668/...
   // làm Host header của Node.js bị "localhost:8668", còn browser gửi
