@@ -25,6 +25,11 @@ function parseUrl(url: string): mssql.config {
     options: {
       encrypt: params.encrypt !== "false",
       trustServerCertificate: params.trustservercertificate !== "false",
+      // Toàn bộ stored procedure ghi thời gian bằng GETDATE(), tức giờ local của
+      // SQL Server (UTC+7). Mặc định tedious dùng useUTC: true nên nó hiểu các
+      // cột datetime đó là UTC, khiến mọi mốc thời gian hiển thị dôi thêm 7 giờ
+      // và JS Date ghi xuống lại bị trừ 7 giờ so với GETDATE().
+      useUTC: false,
     },
     pool: {
       max: 10,
@@ -36,17 +41,32 @@ function parseUrl(url: string): mssql.config {
 
 const globalForPool = globalThis as unknown as {
   _sqlPool?: mssql.ConnectionPool;
+  _sqlPoolKey?: string;
 };
 
 export async function getPool(): Promise<mssql.ConnectionPool> {
-  if (globalForPool._sqlPool?.connected) return globalForPool._sqlPool;
-
   const config = parseUrl(process.env.DATABASE_URL!);
+  // Pool được cache trên globalThis nên nó sống sót qua hot-reload. Kèm theo dấu
+  // vân tay của config để khi sửa connection option (useUTC, encrypt, ...) thì
+  // pool cũ bị bỏ đi thay vì âm thầm chạy tiếp với cấu hình cũ.
+  const key = JSON.stringify(config);
+
+  if (globalForPool._sqlPool?.connected && globalForPool._sqlPoolKey === key) {
+    return globalForPool._sqlPool;
+  }
+
+  const stale = globalForPool._sqlPool;
+  if (stale) {
+    globalForPool._sqlPool = undefined;
+    stale.close().catch(() => {});
+  }
+
   const pool = new mssql.ConnectionPool(config);
   await pool.connect();
 
   if (process.env.NODE_ENV !== "production") {
     globalForPool._sqlPool = pool;
+    globalForPool._sqlPoolKey = key;
   }
 
   return pool;
