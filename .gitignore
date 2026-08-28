@@ -31,14 +31,15 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files
-# Giữ .env (dev local) và .env.example khỏi git
-# .env.production.local được commit vào private repo để server pull về
+# Chỉ .env.example được commit; file env thật (kể cả .env.production.local)
+# quản lý thủ công trên từng máy, không đưa lên git.
 .env
 .env.local
 .env.development
 .env.development.local
 .env.test
 .env.test.local
+.env.production.local
 
 # vercel
 .vercel
@@ -46,4 +47,3 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-.env.production.local
