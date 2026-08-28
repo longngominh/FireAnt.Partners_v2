@@ -348,7 +348,7 @@ export default async function AdminPartnersPage({
               />
               <SortableTableHead
                 sort="revenue"
-                label="Doanh thu tổng"
+                label="Doanh số tổng"
                 currentSort={sort}
                 currentOrder={order}
                 q={q}
@@ -370,7 +370,7 @@ export default async function AdminPartnersPage({
               />
               <SortableTableHead
                 sort="remuneration"
-                label="Thù lao tháng"
+                label="Doanh thu tháng"
                 currentSort={sort}
                 currentOrder={order}
                 q={q}

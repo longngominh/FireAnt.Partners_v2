@@ -59,7 +59,7 @@ export function TrendChart({
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
         <div>
-          <CardTitle className="text-base">Doanh thu &amp; Hoa hồng theo tháng</CardTitle>
+          <CardTitle className="text-base">Doanh số &amp; Hoa hồng theo tháng</CardTitle>
           <CardDescription>
             {displayRange === "ALL" ? "Toàn bộ lịch sử" : `${displayRange} gần nhất`}
           </CardDescription>
@@ -129,7 +129,7 @@ export function TrendChart({
                   labelStyle={{ color: "var(--foreground)", fontWeight: 600 }}
                   formatter={(value, name) => [
                     formatVNDCompact(Number(value ?? 0)),
-                    name === "revenue" ? "Doanh thu" : "Hoa hồng",
+                    name === "revenue" ? "Doanh số" : "Hoa hồng",
                   ]}
                 />
                 <Area

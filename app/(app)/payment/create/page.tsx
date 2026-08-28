@@ -11,7 +11,7 @@ export default async function CreatePaymentPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Tạo link thanh toán</h1>
         <p className="text-sm text-muted-foreground">
-          Chọn gói dịch vụ và thời hạn. Hệ thống tạo link rút gọn + QR ngay lập tức.
+          Chọn gói hội viên hoặc khóa học. Hệ thống tạo link rút gọn + QR ngay lập tức.
         </p>
       </div>
       <CreatePaymentForm packages={packages} />

@@ -35,7 +35,6 @@ const partnerNav: NavItem[] = [
   { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
   { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
   { href: "/customers", label: "Khách hàng", icon: UsersIcon },
-  { href: "/revenue", label: "Doanh thu & hoa hồng", icon: WalletIcon },
 ];
 
 const adminNav: NavItem[] = [

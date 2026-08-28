@@ -209,6 +209,8 @@ BEGIN
   SELECT
     COUNT(*)                       AS PaidLinks,
     ISNULL(SUM(pkg.Amount), 0)     AS TotalRevenue,
+    -- Doanh thu khóa học (ServiceID = 39) tách riêng để dashboard hiển thị breakdown
+    ISNULL(SUM(CASE WHEN pkg.ServiceID = 39 THEN pkg.Amount ELSE 0 END), 0) AS CourseRevenue,
     COUNT(DISTINCT o.UserName)     AS Customers
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
@@ -676,9 +678,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
-  SELECT PackageID, Months, Amount, PackageName
+  -- Gói hội viên (danh sách cố định) + toàn bộ gói khóa học (ServiceID = 39)
+  SELECT PackageID, ServiceID, Months, Amount, PackageName
   FROM   [EStocks_Data].[dbo].[service_Packages]
-  WHERE  PackageID IN (55, 43, 44, 45, 95, 96, 97, 98, 57, 49, 50, 51)
+  WHERE  (
+           PackageID IN (55, 43, 44, 45, 95, 96, 97, 98, 57, 49, 50, 51)
+           OR ServiceID = 39
+         )
     AND  IsTrial = 0
   ORDER BY PackageID;
 END;

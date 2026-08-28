@@ -1,27 +1,38 @@
-import { COMMISSION_BANDS } from "@/lib/commission";
+import {
+  COLLABORATOR_COMMISSION_BANDS,
+  SALES_EMPLOYEE_COMMISSION_BANDS,
+  type CommissionBand,
+  type PartnerType,
+} from "@/lib/commission";
 import { formatVNDCompact } from "@/lib/utils/currency";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type Band = (typeof COMMISSION_BANDS)[number];
+type Band = CommissionBand;
 
-function findBandIndex(revenue: number): number {
-  for (let i = COMMISSION_BANDS.length - 1; i >= 0; i--) {
-    if (revenue >= COMMISSION_BANDS[i].from) return i;
+function findBandIndex(bands: readonly Band[], revenue: number): number {
+  for (let i = bands.length - 1; i >= 0; i--) {
+    if (revenue >= bands[i].from) return i;
   }
   return 0;
 }
 
 export function CommissionProgress({
   monthlyRevenue,
+  partnerType = "sales_employee",
   className,
 }: {
   monthlyRevenue: number;
+  partnerType?: PartnerType;
   className?: string;
 }) {
-  const bandIndex = findBandIndex(monthlyRevenue);
-  const currentBand: Band = COMMISSION_BANDS[bandIndex];
-  const nextBand: Band | undefined = COMMISSION_BANDS[bandIndex + 1];
+  const bands =
+    partnerType === "collaborator"
+      ? COLLABORATOR_COMMISSION_BANDS
+      : SALES_EMPLOYEE_COMMISSION_BANDS;
+  const bandIndex = findBandIndex(bands, monthlyRevenue);
+  const currentBand: Band = bands[bandIndex];
+  const nextBand: Band | undefined = bands[bandIndex + 1];
 
   const isMaxBand = currentBand.to === Infinity;
 
@@ -72,7 +83,8 @@ export function CommissionProgress({
       {isMaxBand ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Đang ở mức cao nhất{" "}
-          <span className="font-semibold text-foreground">15%</span>. Tiếp tục phát huy!
+          <span className="font-semibold text-foreground">{milestoneLabel(currentBand)}</span>.
+          Tiếp tục phát huy!
         </p>
       ) : nextBand && remaining > 0 ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground">

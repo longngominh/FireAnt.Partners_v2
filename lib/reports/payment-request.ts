@@ -133,7 +133,7 @@ export async function buildPaymentRequestWorkbook(
   headerRow.values = [
     "Họ tên",
     "Tk FireAnt",
-    `Doanh thu từ ${dmy(start)} đến ${dmy(lastDay)}`,
+    `Doanh số từ ${dmy(start)} đến ${dmy(lastDay)}`,
     "Tổng hoa hồng",
     "Thanh toán",
     "Số tài khoản",

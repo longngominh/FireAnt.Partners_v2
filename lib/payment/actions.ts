@@ -7,6 +7,7 @@ import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
+import { findFireAntUser } from "@/lib/data/identity";
 import { createPartnerPaymentOrder } from "@/lib/payment/order-payment";
 
 import type { CreatePaymentState } from "@/lib/payment/types";
@@ -58,6 +59,21 @@ export async function createPaymentAction(
       };
     }
 
+    // Kiểm tra tài khoản FireAnt tồn tại trước khi tạo link thanh toán
+    const fireantUser = await findFireAntUser(parsed.data.customerEmail);
+    if (!fireantUser) {
+      return {
+        ok: false,
+        error: "Tài khoản FireAnt không tồn tại.",
+        fieldErrors: {
+          customerEmail: [
+            "Không tìm thấy tài khoản FireAnt với username/email này",
+          ],
+        },
+      };
+    }
+    const customerUserName = fireantUser.userName;
+
     const code = generateShortCode(8);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
     const shortLink = buildShortLink(baseUrl, code);
@@ -68,14 +84,12 @@ export async function createPaymentAction(
     paymentUrl.searchParams.set("packageId", String(parsed.data.packageId));
     paymentUrl.searchParams.set("paymentMethod", "1");
     paymentUrl.searchParams.set("couponCode", code);
-    if (parsed.data.customerEmail?.trim()) {
-      paymentUrl.searchParams.set("userName", parsed.data.customerEmail.trim());
-    }
+    paymentUrl.searchParams.set("userName", customerUserName);
     const paymentLink = paymentUrl.toString();
 
     const paymentOrder = await createPartnerPaymentOrder({
       packageId: parsed.data.packageId,
-      userName: parsed.data.customerEmail.trim(),
+      userName: customerUserName,
       amount: parsed.data.amount,
       couponCode: code,
       note: parsed.data.note?.trim() || null,
@@ -87,7 +101,7 @@ export async function createPaymentAction(
       code,
       paymentLink,
       packageId: parsed.data.packageId,
-      userName: parsed.data.customerEmail.trim() || null,
+      userName: customerUserName,
       note: parsed.data.note?.trim() || null,
     });
 
@@ -108,7 +122,7 @@ export async function createPaymentAction(
         qrPending: paymentOrder.qrPending,
         isMock: paymentOrder.isMock,
         orderAmount: parsed.data.amount,
-        customerEmail: parsed.data.customerEmail?.trim() || null,
+        customerEmail: customerUserName,
         note: parsed.data.note?.trim() || null,
       },
     };

@@ -31,6 +31,7 @@ const SERVICE_BADGE: Record<number, { label: string; color: string }> = {
   33: { label: "Thiết yếu",      color: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300" },
   34: { label: "Chuyên nghiệp",  color: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300" },
   35: { label: "Cao cấp",        color: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300" },
+  39: { label: "Khóa học",       color: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" },
 };
 
 export function CreatePaymentForm({ packages }: Props) {
@@ -51,7 +52,13 @@ export function CreatePaymentForm({ packages }: Props) {
       .map(([serviceId, pkgs]) => ({
         serviceId,
         serviceName: pkgs[0].serviceName,
-        packages: pkgs.sort((a, b) => a.months - b.months),
+        isCourse: pkgs[0].isCourse,
+        // Gói hội viên xếp theo thời hạn, khóa học xếp theo tên
+        packages: pkgs[0].isCourse
+          ? pkgs.sort((a, b) =>
+              (a.packageName ?? "").localeCompare(b.packageName ?? "", "vi"),
+            )
+          : pkgs.sort((a, b) => a.months - b.months),
       }));
   }, [packages]);
 
@@ -60,10 +67,12 @@ export function CreatePaymentForm({ packages }: Props) {
   );
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
 
-  const currentServicePackages = useMemo(
-    () => services.find((s) => s.serviceId === selectedServiceId)?.packages ?? [],
+  const currentService = useMemo(
+    () => services.find((s) => s.serviceId === selectedServiceId) ?? null,
     [services, selectedServiceId],
   );
+  const currentServicePackages = currentService?.packages ?? [];
+  const isCourseService = currentService?.isCourse ?? false;
 
   // Reset package khi đổi service
   function handleSelectService(serviceId: number) {
@@ -126,7 +135,7 @@ export function CreatePaymentForm({ packages }: Props) {
           <CardHeader>
             <CardTitle className="text-base">Chọn gói dịch vụ</CardTitle>
             <CardDescription>
-              Chọn gói và thời hạn để tạo link thanh toán.
+              Chọn gói hội viên hoặc khóa học để tạo link thanh toán.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
@@ -165,9 +174,15 @@ export function CreatePaymentForm({ packages }: Props) {
                 {selectedServiceId !== null && (
                   <div className="flex flex-col gap-2">
                     <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      Thời hạn & Giá
+                      {isCourseService ? "Khóa học & Giá" : "Thời hạn & Giá"}
                     </Label>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                    <div
+                      className={
+                        isCourseService
+                          ? "grid grid-cols-1 gap-2 sm:grid-cols-2"
+                          : "grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
+                      }
+                    >
                       {currentServicePackages.map((pkg) => {
                         const active = selectedPackage?.packageId === pkg.packageId;
                         const badge = SERVICE_BADGE[pkg.serviceId];
@@ -183,7 +198,9 @@ export function CreatePaymentForm({ packages }: Props) {
                             }`}
                           >
                             <span className="text-xs font-medium text-muted-foreground">
-                              {pkg.months === 1
+                              {pkg.isCourse
+                                ? pkg.packageName ?? `Khóa học #${pkg.packageId}`
+                                : pkg.months === 1
                                 ? "1 tháng"
                                 : pkg.months === 12
                                 ? "1 năm"

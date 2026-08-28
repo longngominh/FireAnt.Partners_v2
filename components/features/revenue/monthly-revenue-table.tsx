@@ -26,7 +26,7 @@ const COLUMNS: Column[] = [
   { key: null, label: "Loại", align: "left", className: "hidden xl:table-cell" },
   { key: "orders", label: "Đơn", align: "right", className: "hidden sm:table-cell text-right" },
   { key: "customers", label: "Khách", align: "right", className: "hidden sm:table-cell text-right" },
-  { key: "revenue", label: "Doanh thu", align: "right", className: "text-right" },
+  { key: "revenue", label: "Doanh số", align: "right", className: "text-right" },
   { key: null, label: "Lương cứng", align: "right", className: "hidden lg:table-cell text-right" },
   {
     key: "commission",
@@ -35,7 +35,7 @@ const COLUMNS: Column[] = [
     className: "bg-success/5 text-right text-success",
   },
   { key: null, label: "Thưởng", align: "right", className: "hidden lg:table-cell text-right" },
-  { key: "remuneration", label: "Tổng thù lao", align: "right", className: "text-right" },
+  { key: "remuneration", label: "Tổng doanh thu", align: "right", className: "text-right" },
   { key: null, label: "Tỷ lệ", align: "right", className: "hidden md:table-cell text-right" },
 ];
 

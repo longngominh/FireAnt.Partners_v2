@@ -3,6 +3,7 @@ import {
   calcCommissionFromTotal,
   currentMonthRange,
 } from "@/lib/commission";
+import { monthRange, normalizeMonthKey, type MonthKey } from "@/lib/utils/month";
 
 export type DashboardStats = {
   /** Hoa hồng đã nhận tháng này (bracket model, monthly reset). */
@@ -13,6 +14,10 @@ export type DashboardStats = {
   pendingRevenue: number;
   /** Doanh thu tháng này (các coupon đã được thanh toán). */
   totalRevenue: number;
+  /** Doanh thu gói hội viên trong tháng (= totalRevenue - courseRevenue). */
+  membershipRevenue: number;
+  /** Doanh thu khóa học (ServiceID = 39) trong tháng. */
+  courseRevenue: number;
   /** Tổng coupon đã tạo (all-time). */
   couponsCreated: number;
   /** Coupon đã thanh toán tháng này (dùng cho hero tile hint). */
@@ -32,6 +37,8 @@ const EMPTY_STATS: DashboardStats = {
   pendingAmount: 0,
   pendingRevenue: 0,
   totalRevenue: 0,
+  membershipRevenue: 0,
+  courseRevenue: 0,
   couponsCreated: 0,
   couponsPaid: 0,
   allTimePaid: 0,
@@ -43,6 +50,7 @@ const EMPTY_STATS: DashboardStats = {
 
 export async function getDashboardStats(
   partnerId?: string | number | null,
+  month?: MonthKey | null,
 ): Promise<DashboardStats> {
   try {
     const numPartnerId =
@@ -55,10 +63,18 @@ export async function getDashboardStats(
     const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
 
     const pool = await getPool();
-    const { start: monthStart, end: monthEnd } = currentMonthRange();
+    const { start: monthStart, end: monthEnd } = month
+      ? monthRange(normalizeMonthKey(month))
+      : currentMonthRange();
 
-    // ─── 1. Stats tháng hiện tại ──────────────────────────────────────────────
-    type MonthStatsRow = { PaidLinks: number; TotalRevenue: number; Customers: number };
+    // ─── 1. Stats tháng được chọn (mặc định tháng hiện tại) ──────────────────
+    type MonthStatsRow = {
+      PaidLinks: number;
+      TotalRevenue: number;
+      /** Chỉ có khi DB đã chạy bản usp_GetDashboardMonthStats mới. */
+      CourseRevenue?: number | null;
+      Customers: number;
+    };
     const monthRes = await pool
       .request()
       .input("PartnerId",  sql.Int,      validPartnerId)
@@ -66,7 +82,12 @@ export async function getDashboardStats(
       .input("MonthEnd",   sql.DateTime, monthEnd)
       .execute<MonthStatsRow>("usp_GetDashboardMonthStats");
 
-    const m = monthRes.recordset[0] ?? { PaidLinks: 0, TotalRevenue: 0, Customers: 0 };
+    const m = monthRes.recordset[0] ?? {
+      PaidLinks: 0,
+      TotalRevenue: 0,
+      CourseRevenue: 0,
+      Customers: 0,
+    };
 
     // ─── 2. Tổng coupon all-time ──────────────────────────────────────────────
     type AllStatsRow = {
@@ -108,6 +129,8 @@ export async function getDashboardStats(
 
     // ─── Tổng hợp ────────────────────────────────────────────────────────────
     const totalRevenue = m.TotalRevenue;
+    const courseRevenue = m.CourseRevenue ?? 0;
+    const membershipRevenue = Math.max(0, totalRevenue - courseRevenue);
     const netReceived = calcCommissionFromTotal(totalRevenue);
 
     const pendingAmount = Math.max(
@@ -123,6 +146,8 @@ export async function getDashboardStats(
       pendingAmount,
       pendingRevenue,
       totalRevenue,
+      membershipRevenue,
+      courseRevenue,
       couponsCreated: a.GeneratedLinks,
       couponsPaid: m.PaidLinks,
       allTimePaid: a.PaidLinks,

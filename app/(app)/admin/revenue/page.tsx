@@ -105,7 +105,7 @@ export default async function AdminRevenuePage({
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="p-4">
-          <p className="text-xs text-muted-foreground">Doanh thu tháng</p>
+          <p className="text-xs text-muted-foreground">Doanh số tháng</p>
           <p className="num mt-1 text-xl font-semibold">{formatVND(totals.revenue)}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
             {formatNumber(totals.orderCount)} đơn đã thanh toán
@@ -121,7 +121,7 @@ export default async function AdminRevenuePage({
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-muted-foreground">Tổng thù lao phải trả</p>
+          <p className="text-xs text-muted-foreground">Tổng doanh thu phải trả</p>
           <p className="num mt-1 text-xl font-semibold">{formatVND(totals.remuneration)}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
             Gồm lương cứng {formatVND(totals.baseSalary)}
@@ -203,7 +203,7 @@ export default async function AdminRevenuePage({
         partnerHrefPrefix="/admin/partners"
         emptyMessage={
           rowsFilter === "earning"
-            ? "Không có cộng tác viên nào phát sinh doanh thu hoặc thù lao trong tháng này."
+            ? "Không có cộng tác viên nào phát sinh doanh số trong tháng này."
             : "Không tìm thấy cộng tác viên phù hợp."
         }
       />

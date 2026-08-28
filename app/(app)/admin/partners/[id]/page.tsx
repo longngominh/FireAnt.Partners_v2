@@ -105,13 +105,13 @@ export default async function PartnerDetailPage({
 
       <Card className="grid gap-4 p-5 md:grid-cols-4">
         <div>
-          <p className="text-xs text-muted-foreground">Thù lao tháng này</p>
+          <p className="text-xs text-muted-foreground">Doanh thu tháng này</p>
           <p className="num mt-1 text-xl font-semibold">
             {formatVND(data.monthlyRemuneration.total)}
           </p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Doanh thu tháng</p>
+          <p className="text-xs text-muted-foreground">Doanh số tháng</p>
           <p className="num mt-1 text-lg font-semibold">
             {formatVND(data.monthlyRemuneration.revenue)}
           </p>

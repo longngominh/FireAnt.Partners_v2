@@ -21,6 +21,8 @@ BEGIN
   SELECT
     COUNT(*)                       AS PaidLinks,
     ISNULL(SUM(pkg.Amount), 0)     AS TotalRevenue,
+    -- Doanh thu khóa học (ServiceID = 39) tách riêng để dashboard hiển thị breakdown
+    ISNULL(SUM(CASE WHEN pkg.ServiceID = 39 THEN pkg.Amount ELSE 0 END), 0) AS CourseRevenue,
     COUNT(DISTINCT o.UserName)     AS Customers
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID

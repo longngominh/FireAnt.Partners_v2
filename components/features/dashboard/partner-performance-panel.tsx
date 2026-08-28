@@ -115,13 +115,13 @@ export function PartnerPerformancePanel({
             className="col-span-2 row-span-2 lg:col-span-2"
           />
           <KpiTile
-            label="Doanh thu"
+            label="Doanh số"
             value={formatVND(data.totalRevenue)}
             accent="info"
             icon={<WalletIcon className="size-4" />}
           />
           <KpiTile
-            label="Thù lao tháng này"
+            label="Doanh thu tháng này"
             value={formatVND(data.monthlyRemuneration.total)}
             accent="warning"
             icon={<ClockIcon className="size-4" />}
