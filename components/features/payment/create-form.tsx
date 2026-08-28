@@ -255,6 +255,10 @@ export function CreatePaymentForm({ packages }: Props) {
                   {state.fieldErrors.customerEmail[0]}
                 </p>
               )}
+              <p className="text-xs text-muted-foreground">
+                Khách chưa có tài khoản vẫn tạo được link — sau đó đăng ký bằng
+                đúng username/email này để được kích hoạt gói.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">

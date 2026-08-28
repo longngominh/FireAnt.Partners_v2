@@ -59,20 +59,16 @@ export async function createPaymentAction(
       };
     }
 
-    // Kiểm tra tài khoản FireAnt tồn tại trước khi tạo link thanh toán
-    const fireantUser = await findFireAntUser(parsed.data.customerEmail);
-    if (!fireantUser) {
-      return {
-        ok: false,
-        error: "Tài khoản FireAnt không tồn tại.",
-        fieldErrors: {
-          customerEmail: [
-            "Không tìm thấy tài khoản FireAnt với username/email này",
-          ],
-        },
-      };
+    // Không bắt buộc tài khoản FireAnt tồn tại — khách có thể mua trước,
+    // tạo tài khoản sau. Nếu đã tồn tại thì dùng UserName chuẩn trong DB
+    // (đúng hoa/thường); nếu chưa thì giữ nguyên giá trị đối tác nhập.
+    let customerUserName = parsed.data.customerEmail.trim();
+    try {
+      const fireantUser = await findFireAntUser(customerUserName);
+      if (fireantUser) customerUserName = fireantUser.userName;
+    } catch (err) {
+      console.warn("[createPaymentAction] tra cứu tài khoản FireAnt lỗi, bỏ qua", err);
     }
-    const customerUserName = fireantUser.userName;
 
     const code = generateShortCode(8);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
