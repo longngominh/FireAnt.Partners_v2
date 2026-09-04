@@ -35,7 +35,8 @@ export default async function AdminDashboardPage({
   const range = isTrendRange(query.range) ? query.range : "1M";
   const partners = await listPartners();
   const activePartners = partners.filter((p) => p.isActive);
-  const performance = await getAdminDashboardPerformance(range);
+  // Truyền partners đã tải để không chạy usp_ListPartners lần hai.
+  const performance = await getAdminDashboardPerformance(range, partners);
 
   const ranked = [...activePartners].sort((a, b) => b.totalRevenue - a.totalRevenue);
 

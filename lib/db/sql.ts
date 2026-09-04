@@ -40,36 +40,54 @@ function parseUrl(url: string): mssql.config {
 }
 
 const globalForPool = globalThis as unknown as {
-  _sqlPool?: mssql.ConnectionPool;
+  _sqlPoolPromise?: Promise<mssql.ConnectionPool>;
   _sqlPoolKey?: string;
 };
 
+/**
+ * Trả về pool dùng chung cho cả process (kể cả production).
+ *
+ * Trước đây pool chỉ được cache khi NODE_ENV !== "production": trên server thật
+ * MỖI lần gọi getPool() lại mở một ConnectionPool mới (TCP + TLS + login) và
+ * không bao giờ đóng. Một lần tải /admin gọi getPool() ~36 lần → hàng chục
+ * connection mới mỗi request, càng chạy lâu càng chậm.
+ *
+ * Cache theo Promise (không phải pool đã connect) để nhiều request đến cùng lúc
+ * khi pool chưa sẵn sàng cùng chờ một kết nối thay vì mỗi request tự mở một pool.
+ */
 export async function getPool(): Promise<mssql.ConnectionPool> {
   const config = parseUrl(process.env.DATABASE_URL!);
-  // Pool được cache trên globalThis nên nó sống sót qua hot-reload. Kèm theo dấu
-  // vân tay của config để khi sửa connection option (useUTC, encrypt, ...) thì
-  // pool cũ bị bỏ đi thay vì âm thầm chạy tiếp với cấu hình cũ.
+  // Kèm dấu vân tay của config để khi sửa connection option (useUTC, encrypt, ...)
+  // trong dev/hot-reload thì pool cũ bị bỏ đi thay vì âm thầm chạy tiếp với cấu hình cũ.
   const key = JSON.stringify(config);
 
-  if (globalForPool._sqlPool?.connected && globalForPool._sqlPoolKey === key) {
-    return globalForPool._sqlPool;
+  if (globalForPool._sqlPoolPromise && globalForPool._sqlPoolKey === key) {
+    try {
+      const pool = await globalForPool._sqlPoolPromise;
+      if (pool.connected) return pool;
+    } catch {
+      // Kết nối trước đó thất bại → tạo pool mới bên dưới.
+    }
   }
 
-  const stale = globalForPool._sqlPool;
+  const stale = globalForPool._sqlPoolPromise;
   if (stale) {
-    globalForPool._sqlPool = undefined;
-    stale.close().catch(() => {});
+    globalForPool._sqlPoolPromise = undefined;
+    stale.then((pool) => pool.close()).catch(() => {});
   }
 
-  const pool = new mssql.ConnectionPool(config);
-  await pool.connect();
+  const poolPromise = new mssql.ConnectionPool(config).connect();
+  globalForPool._sqlPoolPromise = poolPromise;
+  globalForPool._sqlPoolKey = key;
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPool._sqlPool = pool;
-    globalForPool._sqlPoolKey = key;
+  try {
+    return await poolPromise;
+  } catch (err) {
+    if (globalForPool._sqlPoolPromise === poolPromise) {
+      globalForPool._sqlPoolPromise = undefined;
+    }
+    throw err;
   }
-
-  return pool;
 }
 
 export { mssql as sql };

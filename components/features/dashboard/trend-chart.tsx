@@ -94,7 +94,14 @@ export function TrendChart({
           </div>
         ) : (
           <div className={`h-full min-h-56 ${isPending ? "opacity-50 transition-opacity" : "transition-opacity"}`}>
-            <ResponsiveContainer width="100%" height="100%">
+            {/*
+              minHeight bắt buộc: height="100%" chỉ đo được khi cha có chiều cao xác định
+              (ví dụ khi Card nằm trong grid cạnh StatusChart). Khi Card đứng một mình
+              (dashboard admin) chuỗi h-full resolve về auto → ResponsiveContainer đo
+              được 0px và không vẽ gì; min-h-56 của div cha không cứu được vì phần trăm
+              không tính theo min-height. 224px = min-h-56.
+            */}
+            <ResponsiveContainer width="100%" height="100%" minHeight={224}>
               <AreaChart data={displayData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="grad-revenue" x1="0" y1="0" x2="0" y2="1">
