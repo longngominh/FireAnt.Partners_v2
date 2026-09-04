@@ -7,27 +7,26 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   SELECT
     o.UserName,
     u.Email,
     u.PhoneNumber,
-    SUM(pkg.Amount)  AS TotalSpent,
+    SUM(o.Amount)    AS TotalSpent,
     COUNT(o.OrderID) AS OrderCount,
     MIN(o.OrderDate) AS FirstOrderAt,
     MAX(o.OrderDate) AS LastOrderAt,
     (SELECT TOP 1 so2.StartDate
-       FROM [EStocks_Data].[dbo].[service_Orders] so2
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS MemberStartDate,
     (SELECT TOP 1 so2.EndDate
-       FROM [EStocks_Data].[dbo].[service_Orders] so2
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS MemberEndDate,
-    (SELECT TOP 1 pkg2.PackageName
-       FROM [EStocks_Data].[dbo].[service_Orders]   so2
-       LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg2
-             ON so2.PackageID = pkg2.PackageID
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+    (SELECT TOP 1 so2.PackageName
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS LatestPackage,
     pu.Name AS PartnerName
   FROM  Coupons cp
@@ -36,13 +35,12 @@ BEGIN
       so.OrderID,
       so.OrderDate,
       so.UserName,
-      so.PackageID
-    FROM [EStocks_Data].[dbo].[service_Orders] so
+      so.PackageID,
+      so.Amount
+    FROM vw_PaidOrders so
     WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
     ORDER BY so.OrderDate DESC, so.OrderID DESC
   ) o
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages]           pkg ON o.PackageID   = pkg.PackageID
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers]    u   ON u.UserName    = o.UserName
   LEFT  JOIN Partners                                          p   ON p.PartnerId   = cp.PartnerId
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers]    pu  ON pu.UserName     = p.UserName

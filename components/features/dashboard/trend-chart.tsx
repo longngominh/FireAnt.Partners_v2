@@ -56,7 +56,10 @@ export function TrendChart({
   }
 
   return (
-    <Card>
+    // h-full + flex-col: khi đứng cạnh cột KPI cao hơn trong grid, Card bị kéo giãn
+    // theo hàng — vùng vẽ phải nở theo (flex-1) thay vì cố định 240px để không thừa
+    // khoảng trắng bên dưới biểu đồ.
+    <Card className="flex h-full flex-col">
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
         <div>
           <CardTitle className="text-base">Doanh số &amp; Hoa hồng theo tháng</CardTitle>
@@ -84,14 +87,14 @@ export function TrendChart({
           </div>
         )}
       </CardHeader>
-      <CardContent className="h-64 w-full">
+      <CardContent className="min-h-64 w-full flex-1">
         {displayData.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          <div className="flex h-full min-h-56 items-center justify-center text-sm text-muted-foreground">
             {isPending ? "Đang tải..." : "Chưa có dữ liệu"}
           </div>
         ) : (
-          <div className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>
-            <ResponsiveContainer width="100%" height={240}>
+          <div className={`h-full min-h-56 ${isPending ? "opacity-50 transition-opacity" : "transition-opacity"}`}>
+            <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={displayData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="grad-revenue" x1="0" y1="0" x2="0" y2="1">

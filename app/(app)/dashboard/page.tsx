@@ -242,34 +242,35 @@ export default async function DashboardPage({
         </Table>
       </Card>
 
-      {/* Conversion + Trend */}
+      {/* Trend + Status: hai card cùng hàng, biểu đồ nở theo chiều cao card trạng thái
+          (~340px) — không xếp thêm tile vào cột phải để card biểu đồ không bị kéo quá cao. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <TrendChart initialData={trendData} partnerId={partnerId ?? null} />
-        <div className="flex flex-col gap-4">
-          {isCurrentMonth ? (
-            <>
-              <CommissionProgress
-                monthlyRevenue={stats.totalRevenue}
-                partnerType={partnerType}
-              />
-              <KpiTile
-                label="Khách hàng tháng này"
-                value={formatNumber(stats.customersServed)}
-                hint="Số khách duy nhất đã thanh toán trong tháng"
-                icon={<UsersIcon className="size-4" />}
-              />
-            </>
-          ) : null}
-          <KpiTile
-            label="Tỷ lệ thanh toán (tổng)"
-            value={`${stats.conversionRate.toFixed(1)}%`}
-            hint="Coupon đã thanh toán / tổng coupon đã tạo (all-time)"
-            accent="brand"
-            icon={<TargetIcon className="size-4" />}
-            className="flex-1"
-          />
-          <StatusChart data={stats.statusBreakdown} />
-        </div>
+        <StatusChart data={stats.statusBreakdown} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {isCurrentMonth ? (
+          <>
+            <CommissionProgress
+              monthlyRevenue={stats.totalRevenue}
+              partnerType={partnerType}
+            />
+            <KpiTile
+              label="Khách hàng tháng này"
+              value={formatNumber(stats.customersServed)}
+              hint="Số khách duy nhất đã thanh toán trong tháng"
+              icon={<UsersIcon className="size-4" />}
+            />
+          </>
+        ) : null}
+        <KpiTile
+          label="Tỷ lệ thanh toán (tổng)"
+          value={`${stats.conversionRate.toFixed(1)}%`}
+          hint="Coupon đã thanh toán / tổng coupon đã tạo (all-time)"
+          accent="brand"
+          icon={<TargetIcon className="size-4" />}
+        />
       </div>
 
       <p className="text-xs text-muted-foreground">
@@ -330,7 +331,7 @@ async function AdminDashboard() {
         />
       </div>
 
-      {/* Conversion + Trend */}
+      {/* Trend + Status cùng hàng (xem chú thích ở dashboard đối tác) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <TrendChart
           initialData={stats.monthlySeries.map((p) => ({
@@ -340,23 +341,23 @@ async function AdminDashboard() {
           }))}
           partnerId={null}
         />
-        <div className="flex flex-col gap-4">
-          <KpiTile
-            label="Khách hàng tháng này"
-            value={formatNumber(stats.customersServed)}
-            hint="Số khách duy nhất đã thanh toán trong tháng"
-            icon={<UsersIcon className="size-4" />}
-          />
-          <KpiTile
-            label="Tỷ lệ thanh toán (tổng)"
-            value={`${stats.conversionRate.toFixed(1)}%`}
-            hint="Coupon đã thanh toán / tổng coupon đã tạo (all-time)"
-            accent="brand"
-            icon={<TargetIcon className="size-4" />}
-            className="flex-1"
-          />
-          <StatusChart data={stats.statusBreakdown} />
-        </div>
+        <StatusChart data={stats.statusBreakdown} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <KpiTile
+          label="Khách hàng tháng này"
+          value={formatNumber(stats.customersServed)}
+          hint="Số khách duy nhất đã thanh toán trong tháng"
+          icon={<UsersIcon className="size-4" />}
+        />
+        <KpiTile
+          label="Tỷ lệ thanh toán (tổng)"
+          value={`${stats.conversionRate.toFixed(1)}%`}
+          hint="Coupon đã thanh toán / tổng coupon đã tạo (all-time)"
+          accent="brand"
+          icon={<TargetIcon className="size-4" />}
+        />
       </div>
     </div>
   );

@@ -6,28 +6,26 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     GROUP BY cp.CouponID
   )
   SELECT
     COUNT(*)                       AS PaidLinks,
-    ISNULL(SUM(pkg.Amount), 0)     AS TotalRevenue,
+    ISNULL(SUM(o.Amount), 0)       AS TotalRevenue,
     -- Doanh thu khóa học (ServiceID = 39) tách riêng để dashboard hiển thị breakdown
-    ISNULL(SUM(CASE WHEN pkg.ServiceID = 39 THEN pkg.Amount ELSE 0 END), 0) AS CourseRevenue,
+    ISNULL(SUM(CASE WHEN o.ServiceID = 39 THEN o.Amount ELSE 0 END), 0) AS CourseRevenue,
     COUNT(DISTINCT o.UserName)     AS Customers
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed   = 1
     AND o.OrderDate >= @MonthStart

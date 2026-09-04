@@ -50,6 +50,7 @@ export const authConfig = {
         path === "/login" ||
         path === "/api/signin" ||
         path.startsWith("/p/") ||
+        path.startsWith("/api/p/") ||
         path.startsWith("/api/auth") ||
         path.startsWith("/_next") ||
         path === "/favicon.ico";

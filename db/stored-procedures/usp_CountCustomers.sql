@@ -5,14 +5,14 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1.
   SELECT COUNT(DISTINCT o.UserName) AS Total
   FROM  Coupons cp
   CROSS APPLY (
     SELECT TOP (1)
       so.UserName
-    FROM [EStocks_Data].[dbo].[service_Orders] so
+    FROM vw_PaidOrders so
     WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
     ORDER BY so.OrderDate DESC, so.OrderID DESC
   ) o
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers] u ON u.UserName = o.UserName

@@ -59,15 +59,33 @@ type MonthlyRevenueRow = {
 };
 
 /**
- * Bản sao inline của usp_GetPartnerMonthlyRevenue, dùng khi DB chưa chạy
- * db/all-stored-procedures.sql cho phiên bản này.
+ * Bản sao inline của usp_GetPartnerMonthlyRevenue (kèm vw_PaidOrders), dùng khi
+ * DB chưa chạy db/all-stored-procedures.sql cho phiên bản này.
  */
 const FALLBACK_QUERY = `
-  WITH PaidOrderIds AS (
+  WITH PaidOrders AS (
+    -- Inline của db/views/vw_PaidOrders.sql: đơn IsPaid = 1,
+    -- Amount = doanh thu thực thu (đơn nâng cấp chỉ tính phần chênh lệch đã trả).
+    SELECT
+      o.OrderID, o.OrderDate, o.UserName, o.CouponCode,
+      CASE
+        WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
+          THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
+        ELSE ISNULL(pkg.Amount, 0)
+      END AS Amount
+    FROM [EStocks_Data].[dbo].[service_Orders] o
+    LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    OUTER APPLY (
+      SELECT SUM(up.Amount) AS Amount
+      FROM [EStocks_Data].[dbo].[service_Upgrades] up
+      WHERE up.OrderID = o.OrderID
+    ) upg
+    WHERE o.IsPaid = 1
+  ),
+  PaidOrderIds AS (
     SELECT cp.CouponID, MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode AND so.Status = 1
+    INNER JOIN PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     GROUP BY cp.CouponID
@@ -75,14 +93,13 @@ const FALLBACK_QUERY = `
   MonthlyByPartner AS (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(pkg.Amount), 0) AS Revenue,
+      ISNULL(SUM(o.Amount), 0)   AS Revenue,
       COUNT(o.OrderID)           AS OrderCount,
       COUNT(DISTINCT o.UserName) AS CustomerCount,
       MAX(o.OrderDate)           AS LastOrderDate
     FROM Coupons cp
     INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID   = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    INNER JOIN PaidOrders o     ON o.OrderID    = poi.OrderID
     WHERE cp.IsUsed = 1
       AND o.OrderDate >= @MonthStart
       AND o.OrderDate <  @MonthEnd

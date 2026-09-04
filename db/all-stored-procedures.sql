@@ -6,8 +6,61 @@
 
 
 -- ---------------------------------------------------------------------------
+-- vw_PaidOrders (view)
+-- ---------------------------------------------------------------------------
+GO
+-- =============================================================================
+-- vw_PaidOrders — đơn đã thanh toán dùng chung cho toàn bộ báo cáo doanh thu.
+--
+-- 1. "Đã thanh toán" = IsPaid = 1. Không dùng Status: service_ProcessOrder set
+--    Status = 1 + IsPaid = 1 cho đơn thường, nhưng service_ProcessUpgradeOrder
+--    (nâng cấp tự động) set Status = 6 + IsPaid = 1, nên lọc Status = 1 sẽ bỏ sót.
+-- 2. Amount là DOANH THU THỰC THU của đơn, không phải giá niêm yết của gói:
+--    - Đơn nâng cấp kiểu cũ: service_Orders.PackageID trỏ tới gói mới nhưng khách
+--      chỉ trả phần chênh lệch. Số tiền đó nằm ở service_Upgrades (theo OrderID,
+--      có thể nhiều dòng khi nâng cấp nối tiếp hoặc dòng điều chỉnh âm, nên cộng dồn).
+--    - Đơn nâng cấp kiểu mới (từ 09/2026): phần chênh lệch ghi thẳng vào
+--      service_Orders.UpgradeAmount (nếu sau đó nâng cấp tiếp thì có thêm dòng
+--      service_Upgrades, cũng cộng dồn).
+--    - Đơn thường: lấy giá gói service_Packages.Amount.
+--    ListAmount giữ giá niêm yết để đối chiếu khi cần.
+--
+-- Mọi stored procedure tính doanh thu/hoa hồng phải đi qua view này để dashboard,
+-- bảng kê tháng, danh sách CTV/khách hàng cho ra cùng một con số.
+-- =============================================================================
+CREATE OR ALTER VIEW vw_PaidOrders
+AS
+SELECT
+  o.OrderID,
+  o.OrderDate,
+  o.StartDate,
+  o.EndDate,
+  o.UserName,
+  o.CouponCode,
+  o.PackageID,
+  pkg.ServiceID,
+  pkg.PackageName,
+  pkg.Amount AS ListAmount,
+  CASE
+    WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
+      THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
+    ELSE ISNULL(pkg.Amount, 0)
+  END AS Amount
+FROM  [EStocks_Data].[dbo].[service_Orders]   o
+LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+OUTER APPLY (
+  SELECT SUM(up.Amount) AS Amount
+  FROM [EStocks_Data].[dbo].[service_Upgrades] up
+  WHERE up.OrderID = o.OrderID
+) upg
+WHERE o.IsPaid = 1;
+
+
+-- ---------------------------------------------------------------------------
 -- usp_CountCoupons
 -- ---------------------------------------------------------------------------
+GO
+
 GO
 CREATE OR ALTER PROCEDURE usp_CountCoupons
   @PartnerId INT           = NULL,
@@ -17,6 +70,19 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- PaidByCoupon: xem chú thích trong usp_ListCoupons (tính một lần, không tra từng coupon).
+  WITH PaidByCoupon AS (
+    SELECT o.CouponCode, MAX(o.OrderID) AS OrderID
+    FROM [EStocks_Data].[dbo].[service_Orders] o
+    WHERE o.IsPaid = 1 AND o.CouponCode IS NOT NULL
+    GROUP BY o.CouponCode
+  ),
+  PaidUserMatch AS (
+    SELECT p.CouponCode
+    FROM PaidByCoupon p
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so ON so.OrderID = p.OrderID
+    WHERE @Q IS NOT NULL AND ISNULL(so.UserName, '') LIKE @Q
+  )
   SELECT COUNT(*) AS Total
   FROM  Coupons cp
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
@@ -24,30 +90,22 @@ BEGIN
       @Status = 'ALL'
       OR (@Status = 'PAID'    AND cp.IsUsed = 1)
       OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
-        SELECT 1
-        FROM [EStocks_Data].[dbo].[service_Orders] so
-        WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        SELECT 1 FROM PaidByCoupon p WHERE p.CouponCode = cp.CouponCode
       ))
       OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
       OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() AND NOT EXISTS (
-        SELECT 1
-        FROM [EStocks_Data].[dbo].[service_Orders] so
-        WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+        SELECT 1 FROM PaidByCoupon p WHERE p.CouponCode = cp.CouponCode
       ))
     )
     AND (
       @Q IS NULL
       OR cp.CouponCode LIKE @Q
       OR ISNULL(cp.UserName,'') LIKE @Q
-      OR EXISTS (
-        SELECT 1
-        FROM [EStocks_Data].[dbo].[service_Orders] so
-        WHERE so.CouponCode = cp.CouponCode
-          AND so.Status = 1
-          AND ISNULL(so.UserName, '') LIKE @Q
-      )
+      OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
     );
 END;
+
+
 
 
 -- ---------------------------------------------------------------------------
@@ -61,14 +119,14 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1.
   SELECT COUNT(DISTINCT o.UserName) AS Total
   FROM  Coupons cp
   CROSS APPLY (
     SELECT TOP (1)
       so.UserName
-    FROM [EStocks_Data].[dbo].[service_Orders] so
+    FROM vw_PaidOrders so
     WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
     ORDER BY so.OrderDate DESC, so.OrderID DESC
   ) o
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers] u ON u.UserName = o.UserName
@@ -112,6 +170,14 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- Đơn đã thanh toán mới nhất của coupon: lấy MAX(OrderID) theo CouponCode rồi
+  -- đọc vw_PaidOrders theo OrderID (PK) — tránh mẫu TOP (1) ORDER BY OrderDate
+  -- khiến SQL Server quét ngược index OrderDate (xem chú thích usp_ListCoupons).
+  DECLARE @OrderID INT;
+  SELECT @OrderID = MAX(o.OrderID)
+  FROM [EStocks_Data].[dbo].[service_Orders] o
+  WHERE o.CouponCode = @CouponCode AND o.IsPaid = 1;
+
   SELECT
     cp.CouponID,
     cp.CouponCode,
@@ -122,7 +188,8 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    ISNULL(pkg.Amount, 0)                                                 AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
+    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -138,17 +205,7 @@ BEGIN
     cp.UserName,
     cp.Note
   FROM  Coupons cp
-  OUTER APPLY (
-    SELECT TOP (1)
-      so.OrderID,
-      so.OrderDate,
-      so.UserName,
-      so.PackageID
-    FROM [EStocks_Data].[dbo].[service_Orders] so
-    WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
-    ORDER BY so.OrderDate DESC, so.OrderID DESC
-  ) o
+  LEFT  JOIN vw_PaidOrders o ON o.OrderID = @OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
@@ -160,6 +217,7 @@ BEGIN
   )
   WHERE cp.CouponCode = @CouponCode;
 END;
+
 
 
 -- ---------------------------------------------------------------------------
@@ -194,28 +252,26 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     GROUP BY cp.CouponID
   )
   SELECT
     COUNT(*)                       AS PaidLinks,
-    ISNULL(SUM(pkg.Amount), 0)     AS TotalRevenue,
+    ISNULL(SUM(o.Amount), 0)       AS TotalRevenue,
     -- Doanh thu khóa học (ServiceID = 39) tách riêng để dashboard hiển thị breakdown
-    ISNULL(SUM(CASE WHEN pkg.ServiceID = 39 THEN pkg.Amount ELSE 0 END), 0) AS CourseRevenue,
+    ISNULL(SUM(CASE WHEN o.ServiceID = 39 THEN o.Amount ELSE 0 END), 0) AS CourseRevenue,
     COUNT(DISTINCT o.UserName)     AS Customers
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed   = 1
     AND o.OrderDate >= @MonthStart
@@ -258,25 +314,23 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     GROUP BY cp.CouponID
   )
   SELECT
     FORMAT(o.OrderDate, 'yyyy-MM') AS Month,
-    SUM(pkg.Amount)                AS Revenue
+    SUM(o.Amount)                  AS Revenue
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed    = 1
     AND o.OrderDate >= @Since
@@ -321,14 +375,14 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu
+  -- (đơn nâng cấp chỉ tính phần chênh lệch khách đã trả, không tính trọn giá gói).
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     GROUP BY cp.CouponID
@@ -336,14 +390,13 @@ BEGIN
   MonthlyByPartner AS (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(pkg.Amount), 0) AS Revenue,
+      ISNULL(SUM(o.Amount), 0)   AS Revenue,
       COUNT(o.OrderID)           AS OrderCount,
       COUNT(DISTINCT o.UserName) AS CustomerCount,
       MAX(o.OrderDate)           AS LastOrderDate
     FROM  Coupons cp
     INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID   = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
     WHERE cp.IsUsed = 1
       AND o.OrderDate >= @MonthStart
       AND o.OrderDate <  @MonthEnd
@@ -380,14 +433,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     LEFT JOIN Partners p ON p.PartnerId = cp.PartnerId
     WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
       AND cp.IsUsed = 1
@@ -399,12 +451,11 @@ BEGIN
     COUNT(*)                                                                                  AS TotalCoupons,
     SUM(CASE WHEN cp.IsUsed = 1 THEN 1 ELSE 0 END)                                           AS PaidCoupons,
     SUM(CASE WHEN cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() THEN 1 ELSE 0 END)             AS PendingCoupons,
-    ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN pkg.Amount ELSE 0 END), 0)                       AS TotalRevenue,
+    ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN o.Amount ELSE 0 END), 0)                         AS TotalRevenue,
     COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)                               AS CustomerCount
   FROM  Coupons cp
   LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  LEFT  JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   LEFT  JOIN Partners p ON p.PartnerId = cp.PartnerId
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND (@Since IS NULL OR cp.CreatedDate >= @Since)
@@ -422,14 +473,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.PartnerId = @PartnerId
       AND cp.IsUsed = 1
     GROUP BY cp.CouponID
@@ -437,11 +487,10 @@ BEGIN
   -- Trả về 6 tháng gần nhất có doanh thu, sắp xếp DESC để gọi .reverse() phía app
   SELECT TOP 6
     FORMAT(o.OrderDate, 'yyyy-MM') AS Month,
-    SUM(pkg.Amount)                AS Revenue
+    SUM(o.Amount)                  AS Revenue
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   WHERE cp.PartnerId = @PartnerId
     AND cp.IsUsed    = 1
   GROUP BY FORMAT(o.OrderDate, 'yyyy-MM')
@@ -462,14 +511,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     LEFT JOIN Partners p ON p.PartnerId = cp.PartnerId
     WHERE cp.IsUsed = 1
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
@@ -482,11 +530,10 @@ BEGIN
       WHEN @IsDaily = 1 THEN FORMAT(o.OrderDate, 'yyyy-MM-dd')
       ELSE                    FORMAT(o.OrderDate, 'yyyy-MM')
     END                                                               AS Period,
-    SUM(pkg.Amount)                                                   AS Revenue
+    SUM(o.Amount)                                                     AS Revenue
   FROM  Coupons cp
   INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-  INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+  INNER JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
   LEFT  JOIN Partners p ON p.PartnerId = cp.PartnerId
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND cp.IsUsed = 1
@@ -515,7 +562,27 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
-  WITH PagedCoupons AS (
+  -- PaidByCoupon: đơn đã thanh toán mới nhất của MỖI coupon, tính MỘT LẦN bằng một
+  -- lượt quét index IsPaid (~35 ms) rồi join theo OrderID (PK). Trước đây mỗi coupon
+  -- tra riêng bằng OUTER APPLY TOP (1) ... ORDER BY OrderDate DESC trên vw_PaidOrders;
+  -- SQL Server ước lượng sai và quét ngược index OrderDate (~200k dòng) cho từng
+  -- coupon nên trang 20 dòng mất 4–5 giây. Amount vẫn lấy qua vw_PaidOrders để cùng
+  -- công thức với các báo cáo doanh thu.
+  WITH PaidByCoupon AS (
+    SELECT o.CouponCode, MAX(o.OrderID) AS OrderID
+    FROM [EStocks_Data].[dbo].[service_Orders] o
+    WHERE o.IsPaid = 1 AND o.CouponCode IS NOT NULL
+    GROUP BY o.CouponCode
+  ),
+  -- Coupon có đơn đã thanh toán mà UserName trên đơn khớp từ khoá tìm kiếm
+  -- (tính một lần thay vì EXISTS + LIKE cho từng coupon).
+  PaidUserMatch AS (
+    SELECT p.CouponCode
+    FROM PaidByCoupon p
+    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so ON so.OrderID = p.OrderID
+    WHERE @Q IS NOT NULL AND ISNULL(so.UserName, '') LIKE @Q
+  ),
+  PagedCoupons AS (
     SELECT
       cp.CouponID,
       cp.CouponCode,
@@ -531,15 +598,11 @@ BEGIN
         @Status = 'ALL'
         OR (@Status = 'PAID'    AND cp.IsUsed = 1)
         OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
-          SELECT 1
-          FROM [EStocks_Data].[dbo].[service_Orders] so
-          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+          SELECT 1 FROM PaidByCoupon p WHERE p.CouponCode = cp.CouponCode
         ))
         OR (@Status = 'EXPIRED' AND cp.IsUsed = 0 AND cp.ExpireDate < GETDATE())
         OR (@Status = 'PENDING' AND cp.IsUsed = 0 AND cp.ExpireDate >= GETDATE() AND NOT EXISTS (
-          SELECT 1
-          FROM [EStocks_Data].[dbo].[service_Orders] so
-          WHERE so.CouponCode = cp.CouponCode AND so.Status = 1
+          SELECT 1 FROM PaidByCoupon p WHERE p.CouponCode = cp.CouponCode
         ))
       )
       AND (
@@ -547,13 +610,7 @@ BEGIN
         OR cp.CouponCode LIKE @Q
         OR ISNULL(cp.UserName, '') LIKE @Q
         OR cp.PaymentLink LIKE @Q
-        OR EXISTS (
-          SELECT 1
-          FROM [EStocks_Data].[dbo].[service_Orders] so
-          WHERE so.CouponCode = cp.CouponCode
-            AND so.Status = 1
-            AND ISNULL(so.UserName, '') LIKE @Q
-        )
+        OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
       )
     ORDER BY cp.CreatedDate DESC
     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
@@ -568,7 +625,8 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    ISNULL(pkg.Amount, 0)                                                 AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
+    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -584,17 +642,8 @@ BEGIN
     cp.UserName,
     cp.Note
   FROM  PagedCoupons cp
-  OUTER APPLY (
-    SELECT TOP (1)
-      so.OrderID,
-      so.OrderDate,
-      so.UserName,
-      so.PackageID
-    FROM [EStocks_Data].[dbo].[service_Orders] so
-    WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
-    ORDER BY so.OrderDate DESC, so.OrderID DESC
-  ) o
+  LEFT  JOIN PaidByCoupon pbc ON pbc.CouponCode = cp.CouponCode
+  LEFT  JOIN vw_PaidOrders o  ON o.OrderID      = pbc.OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
     o.PackageID,
     TRY_CAST(SUBSTRING(
@@ -606,6 +655,8 @@ BEGIN
   )
   ORDER BY cp.CreatedDate DESC;
 END;
+
+
 
 
 -- ---------------------------------------------------------------------------
@@ -621,27 +672,26 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   SELECT
     o.UserName,
     u.Email,
     u.PhoneNumber,
-    SUM(pkg.Amount)  AS TotalSpent,
+    SUM(o.Amount)    AS TotalSpent,
     COUNT(o.OrderID) AS OrderCount,
     MIN(o.OrderDate) AS FirstOrderAt,
     MAX(o.OrderDate) AS LastOrderAt,
     (SELECT TOP 1 so2.StartDate
-       FROM [EStocks_Data].[dbo].[service_Orders] so2
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS MemberStartDate,
     (SELECT TOP 1 so2.EndDate
-       FROM [EStocks_Data].[dbo].[service_Orders] so2
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS MemberEndDate,
-    (SELECT TOP 1 pkg2.PackageName
-       FROM [EStocks_Data].[dbo].[service_Orders]   so2
-       LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg2
-             ON so2.PackageID = pkg2.PackageID
-      WHERE so2.UserName = o.UserName AND so2.IsPaid = 1
+    (SELECT TOP 1 so2.PackageName
+       FROM vw_PaidOrders so2
+      WHERE so2.UserName = o.UserName
       ORDER BY so2.OrderDate DESC)                     AS LatestPackage,
     pu.Name AS PartnerName
   FROM  Coupons cp
@@ -650,13 +700,12 @@ BEGIN
       so.OrderID,
       so.OrderDate,
       so.UserName,
-      so.PackageID
-    FROM [EStocks_Data].[dbo].[service_Orders] so
+      so.PackageID,
+      so.Amount
+    FROM vw_PaidOrders so
     WHERE so.CouponCode = cp.CouponCode
-      AND so.Status = 1
     ORDER BY so.OrderDate DESC, so.OrderID DESC
   ) o
-  LEFT  JOIN [EStocks_Data].[dbo].[service_Packages]           pkg ON o.PackageID   = pkg.PackageID
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers]    u   ON u.UserName    = o.UserName
   LEFT  JOIN Partners                                          p   ON p.PartnerId   = cp.PartnerId
   LEFT  JOIN [NEWFA].[FireAnt_Identity].[dbo].[AspNetUsers]    pu  ON pu.UserName     = p.UserName
@@ -699,14 +748,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
     GROUP BY cp.CouponID
   ),
@@ -715,9 +763,7 @@ BEGIN
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND so.OrderDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
       AND so.OrderDate <  DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))
@@ -740,23 +786,21 @@ BEGIN
   LEFT JOIN (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN pkg.Amount ELSE 0 END), 0)  AS TotalRevenue,
+      ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN o.Amount ELSE 0 END), 0)    AS TotalRevenue,
       COUNT(*)                                                              AS CouponCount,
       COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)          AS CustomerCount
     FROM  Coupons cp
     LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+    LEFT  JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
     GROUP BY cp.PartnerId
   ) stats ON p.PartnerId = stats.PartnerId
   LEFT JOIN (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(pkg.Amount), 0) AS MonthlyRevenue
+      ISNULL(SUM(o.Amount), 0) AS MonthlyRevenue
     FROM Coupons cp
     INNER JOIN MonthlyPaidOrderIds poi ON poi.CouponID = cp.CouponID
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID = pkg.PackageID
+    INNER JOIN vw_PaidOrders o         ON o.OrderID    = poi.OrderID
     GROUP BY cp.PartnerId
   ) monthly ON p.PartnerId = monthly.PartnerId
   ORDER BY p.PartnerId;
@@ -781,5 +825,5 @@ END;
 
 GO
 -- =============================================================================
--- Hoàn tất. Tổng cộng 18 stored procedures đã được tạo/cập nhật.
+-- Hoàn tất. Tổng cộng 18 stored procedures + 1 view + 1 view đã được tạo/cập nhật.
 -- =============================================================================

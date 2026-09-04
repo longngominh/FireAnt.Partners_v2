@@ -3,14 +3,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
+  -- vw_PaidOrders: đơn IsPaid = 1, Amount = doanh thu thực thu.
   WITH PaidOrderIds AS (
     SELECT
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
     GROUP BY cp.CouponID
   ),
@@ -19,9 +18,7 @@ BEGIN
       cp.CouponID,
       MAX(so.OrderID) AS OrderID
     FROM Coupons cp
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-      ON so.CouponCode = cp.CouponCode
-     AND so.Status = 1
+    INNER JOIN vw_PaidOrders so ON so.CouponCode = cp.CouponCode
     WHERE cp.IsUsed = 1
       AND so.OrderDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
       AND so.OrderDate <  DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1))
@@ -44,23 +41,21 @@ BEGIN
   LEFT JOIN (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN pkg.Amount ELSE 0 END), 0)  AS TotalRevenue,
+      ISNULL(SUM(CASE WHEN cp.IsUsed = 1 THEN o.Amount ELSE 0 END), 0)    AS TotalRevenue,
       COUNT(*)                                                              AS CouponCount,
       COUNT(DISTINCT CASE WHEN cp.IsUsed = 1 THEN o.UserName END)          AS CustomerCount
     FROM  Coupons cp
     LEFT  JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID  = pkg.PackageID
+    LEFT  JOIN vw_PaidOrders o  ON o.OrderID    = poi.OrderID
     GROUP BY cp.PartnerId
   ) stats ON p.PartnerId = stats.PartnerId
   LEFT JOIN (
     SELECT
       cp.PartnerId,
-      ISNULL(SUM(pkg.Amount), 0) AS MonthlyRevenue
+      ISNULL(SUM(o.Amount), 0) AS MonthlyRevenue
     FROM Coupons cp
     INNER JOIN MonthlyPaidOrderIds poi ON poi.CouponID = cp.CouponID
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders]   o   ON o.OrderID = poi.OrderID
-    LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID = pkg.PackageID
+    INNER JOIN vw_PaidOrders o         ON o.OrderID    = poi.OrderID
     GROUP BY cp.PartnerId
   ) monthly ON p.PartnerId = monthly.PartnerId
   ORDER BY p.PartnerId;

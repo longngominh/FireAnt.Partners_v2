@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { formatVND } from "@/lib/utils/currency";
 import type { Coupon } from "@/lib/data/payment";
+import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { StatusBadge } from "./status-badge";
 import { CouponRowActions } from "./coupon-row-actions";
 
@@ -46,9 +47,16 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
             <TableRow key={coupon.id} className="group">
               <TableCell>
                 <div className="flex flex-col leading-tight">
-                  <code className="font-mono text-xs font-medium">
-                    {coupon.code}
-                  </code>
+                  <span className="flex items-center gap-1.5">
+                    <code className="font-mono text-xs font-medium">
+                      {coupon.code}
+                    </code>
+                    {isUpgradePaymentLink(coupon.paymentLink) ? (
+                      <span className="rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary">
+                        Nâng cấp
+                      </span>
+                    ) : null}
+                  </span>
                   {coupon.packageName ? (
                     <span className="text-xs text-muted-foreground">{coupon.packageName}</span>
                   ) : null}

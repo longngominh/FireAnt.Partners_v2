@@ -168,23 +168,39 @@ async function getPartnerMonthlyRevenue(
     .input("StartDate", sql.DateTime, start)
     .input("EndDate", sql.DateTime, end)
     .query<{ MonthlyRevenue: number }>(`
-      WITH PaidOrderIds AS (
+      WITH PaidOrders AS (
+        -- Inline của db/views/vw_PaidOrders.sql: đơn IsPaid = 1,
+        -- Amount = doanh thu thực thu (đơn nâng cấp chỉ tính phần chênh lệch đã trả).
+        SELECT
+          o.OrderID, o.OrderDate, o.CouponCode,
+          CASE
+            WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
+              THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
+            ELSE ISNULL(pkg.Amount, 0)
+          END AS Amount
+        FROM [EStocks_Data].[dbo].[service_Orders] o
+        LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+        OUTER APPLY (
+          SELECT SUM(up.Amount) AS Amount
+          FROM [EStocks_Data].[dbo].[service_Upgrades] up
+          WHERE up.OrderID = o.OrderID
+        ) upg
+        WHERE o.IsPaid = 1
+      ),
+      PaidOrderIds AS (
         SELECT
           cp.CouponID,
           MAX(so.OrderID) AS OrderID
         FROM Coupons cp
-        INNER JOIN [EStocks_Data].[dbo].[service_Orders] so
-          ON so.CouponCode = cp.CouponCode
-         AND so.Status = 1
+        INNER JOIN PaidOrders so ON so.CouponCode = cp.CouponCode
         WHERE cp.PartnerId = @PartnerId
           AND cp.IsUsed = 1
         GROUP BY cp.CouponID
       )
-      SELECT ISNULL(SUM(pkg.Amount), 0) AS MonthlyRevenue
+      SELECT ISNULL(SUM(o.Amount), 0) AS MonthlyRevenue
       FROM Coupons cp
       INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-      INNER JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.OrderID = poi.OrderID
-      LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON o.PackageID = pkg.PackageID
+      INNER JOIN PaidOrders o     ON o.OrderID    = poi.OrderID
       WHERE cp.PartnerId = @PartnerId
         AND o.OrderDate >= @StartDate
         AND o.OrderDate < @EndDate;

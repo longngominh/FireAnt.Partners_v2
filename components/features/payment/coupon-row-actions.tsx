@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatVND } from "@/lib/utils/currency";
 import { qrToDataUrl } from "@/lib/utils/qr";
+import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { StatusBadge } from "./status-badge";
 import type { Coupon } from "@/lib/data/payment";
 
@@ -38,10 +39,19 @@ export function CouponRowActions({
   const [open, setOpen] = useState(false);
   const [paymentQr, setPaymentQr] = useState<PaymentQrResult | null>(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+  const isUpgrade = isUpgradePaymentLink(paymentLink);
+
+  /** Coupon nâng cấp: gửi khách link rút gọn /p/{code} (trang QR công khai), không gửi link kèm tham số nội bộ. */
+  function shareLink(): string {
+    if (!isUpgrade) return paymentLink;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/p/${coupon.code}`;
+  }
 
   async function copyLink() {
-    await navigator.clipboard.writeText(paymentLink);
-    toast.success("Đã copy link thanh toán", { description: paymentLink });
+    const link = shareLink();
+    await navigator.clipboard.writeText(link);
+    toast.success("Đã copy link thanh toán", { description: link });
   }
 
   async function copyCode() {
@@ -70,7 +80,7 @@ export function CouponRowActions({
           return payload.qrCodeUrl as string;
         }
 
-        const fallbackQrCodeUrl = await qrToDataUrl(paymentLink);
+        const fallbackQrCodeUrl = await qrToDataUrl(shareLink());
         setPaymentQr({
           ...payload,
           qrCodeUrl: fallbackQrCodeUrl,
@@ -81,7 +91,7 @@ export function CouponRowActions({
         if (err instanceof PaymentQrFatalError) throw err;
 
         console.warn("[payment-qr] fallback to checkout QR", err);
-        const fallbackQrCodeUrl = await qrToDataUrl(paymentLink);
+        const fallbackQrCodeUrl = await qrToDataUrl(shareLink());
         setPaymentQr({
           orderId: 0,
           qrCodeUrl: fallbackQrCodeUrl,
@@ -158,6 +168,7 @@ export function CouponRowActions({
               <StatusBadge status={coupon.status} />
             </DialogTitle>
             <DialogDescription>
+              {isUpgrade ? "Nâng cấp hội viên · " : ""}
               {coupon.customerName ?? "Chưa sử dụng"}
               {coupon.packageName ? ` · ${coupon.packageName}` : ""}
             </DialogDescription>
