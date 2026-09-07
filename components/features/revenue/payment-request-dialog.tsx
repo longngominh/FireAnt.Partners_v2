@@ -98,7 +98,7 @@ export function PaymentRequestDialog({
           <DialogTitle>Giấy đề nghị thanh toán</DialogTitle>
           <DialogDescription>
             {payableCount > 0
-              ? `${payableCount} cộng tác viên nhận hoa hồng ${formatVND(payableAmount)} cho kỳ ${formatMonthRangeLabel(month)}.`
+              ? `${payableCount} cộng tác viên, tổng đề nghị thanh toán ${formatVND(payableAmount)} cho kỳ ${formatMonthRangeLabel(month)}.`
               : "Danh sách đang lọc không có cộng tác viên nào phát sinh hoa hồng."}
           </DialogDescription>
         </DialogHeader>

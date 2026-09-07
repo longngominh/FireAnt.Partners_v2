@@ -57,7 +57,14 @@ export default async function AdminRevenuePage({
   const { q, type, status, rows: rowsFilter } = filters;
   const activeFilters = { q, type, status, rows: rowsFilter, sort, order };
   const hasFilters = Boolean(q) || type !== "all" || status !== "all" || rowsFilter !== "earning";
-  const payableCount = rows.filter((row) => row.remuneration.commission > 0).length;
+  // Khớp bộ lọc của route xuất Giấy đề nghị thanh toán: chỉ người có hoa hồng > 0.
+  const payableRows = rows.filter((row) => row.remuneration.commission > 0);
+  const payableCount = payableRows.length;
+  // Hoa hồng + thưởng, không gồm lương cứng NVKD (trả qua bảng lương riêng).
+  const payableAmount = payableRows.reduce(
+    (sum, row) => sum + row.remuneration.commission + row.remuneration.performanceBonus,
+    0,
+  );
 
   function buildHref(overrides: Record<string, string | undefined>) {
     const sp = new URLSearchParams({ month });
@@ -98,7 +105,7 @@ export default async function AdminRevenuePage({
             searchParams={activeFilters}
             defaultRequesterName={session.user.name ?? ""}
             payableCount={payableCount}
-            payableAmount={rows.reduce((sum, row) => sum + row.remuneration.commission, 0)}
+            payableAmount={payableAmount}
           />
         </div>
       </div>

@@ -61,6 +61,7 @@ export async function GET(request: Request) {
         username: row.username,
         revenue: row.revenue,
         commission: row.remuneration.commission,
+        bonus: row.remuneration.performanceBonus,
         bankAccountNumber: info?.bankAccountNumber ?? "",
         bankName: info?.bankName ?? "",
       };

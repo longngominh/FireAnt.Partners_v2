@@ -8,6 +8,7 @@ export type PaymentRequestRow = {
   username: string;
   revenue: number;
   commission: number;
+  bonus: number;
   bankAccountNumber: string;
   bankName: string;
 };
@@ -30,12 +31,16 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   right: { style: "thin" },
 };
 
-// A Họ tên | B Tk FireAnt | C Doanh thu | D Tổng hoa hồng | E Thanh toán
-// F Số tài khoản | G Ngân hàng | H Nội dung CK
-const COLUMN_WIDTHS = [28.53, 30, 27.47, 16.82, 16.29, 20.18, 21.53, 25.82, 50];
+// A Họ tên | B Tk FireAnt | C Doanh số | D Hoa hồng | E Thưởng | F Thanh toán (= D + E)
+// G Số tài khoản | H Ngân hàng | I Nội dung CK
+// Cột Thanh toán KHÔNG gồm lương cứng của NVKD — lương cứng trả qua bảng lương riêng,
+// nên không dùng remuneration.total (cột "Tổng doanh thu" trên bảng kê).
+const COLUMN_WIDTHS = [28.53, 30, 27.47, 16.82, 16.29, 18.5, 20.18, 21.53, 25.82];
 const FIRST_MONEY_COLUMN = 3;
-const LAST_MONEY_COLUMN = 5;
-const LAST_COLUMN = 8;
+const LAST_MONEY_COLUMN = 6;
+const LAST_COLUMN = 9;
+// Cột đặt khối ngày lập / chữ ký "Người đề nghị" (cột Ngân hàng).
+const SIGNATURE_COLUMN = 8;
 
 // KHÔNG đặt row.height. Excel đọc thuộc tính ht của file do exceljs sinh ra rồi
 // nhân với tỉ lệ DPI của màn hình (máy 225% cho ra ~0.45 lần), làm mọi dòng bị
@@ -107,13 +112,13 @@ export async function buildPaymentRequestWorkbook(
 
   sheet.getCell("A5").value = "Tên tôi là";
   sheet.getCell("B5").value = requesterName;
-  sheet.mergeCells("D5:H5");
+  sheet.mergeCells("D5:I5");
 
   sheet.getCell("A6").value = "Bộ phận công tác";
   sheet.getCell("B6").value = department;
-  sheet.mergeCells("D6:H6");
+  sheet.mergeCells("D6:I6");
 
-  sheet.mergeCells("A7:H7");
+  sheet.mergeCells("A7:I7");
   sheet.getCell("A7").value = {
     richText: [
       {
@@ -134,7 +139,8 @@ export async function buildPaymentRequestWorkbook(
     "Họ tên",
     "Tk FireAnt",
     `Doanh số từ ${dmy(start)} đến ${dmy(lastDay)}`,
-    "Tổng hoa hồng",
+    "Hoa hồng",
+    "Thưởng",
     "Thanh toán",
     "Số tài khoản",
     "Ngân hàng",
@@ -157,11 +163,15 @@ export async function buildPaymentRequestWorkbook(
     sheetRow.getCell(2).value = row.username;
     sheetRow.getCell(3).value = row.revenue;
     sheetRow.getCell(4).value = row.commission;
-    sheetRow.getCell(5).value = { formula: `D${rowNumber}`, result: row.commission };
+    sheetRow.getCell(5).value = row.bonus;
+    sheetRow.getCell(6).value = {
+      formula: `D${rowNumber}+E${rowNumber}`,
+      result: row.commission + row.bonus,
+    };
     // Ghi số tài khoản dạng text để không mất số 0 đứng đầu.
-    sheetRow.getCell(6).value = row.bankAccountNumber;
-    sheetRow.getCell(7).value = row.bankName;
-    sheetRow.getCell(8).value = note;
+    sheetRow.getCell(7).value = row.bankAccountNumber;
+    sheetRow.getCell(8).value = row.bankName;
+    sheetRow.getCell(9).value = note;
 
     for (let col = 1; col <= LAST_COLUMN; col += 1) {
       const cell = sheetRow.getCell(col);
@@ -170,7 +180,7 @@ export async function buildPaymentRequestWorkbook(
       if (col >= FIRST_MONEY_COLUMN && col <= LAST_MONEY_COLUMN) {
         cell.numFmt = MONEY_FORMAT;
         cell.alignment = { horizontal: "right" };
-      } else if (col === 2 || col === 6) {
+      } else if (col === 2 || col === 7) {
         cell.alignment = { horizontal: "left" };
       }
     }
@@ -181,6 +191,8 @@ export async function buildPaymentRequestWorkbook(
   const totalRow = sheet.getRow(totalRowNumber);
   const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
   const totalCommission = rows.reduce((sum, row) => sum + row.commission, 0);
+  const totalBonus = rows.reduce((sum, row) => sum + row.bonus, 0);
+  const totalPayable = totalCommission + totalBonus;
 
   totalRow.getCell(1).value = "Tổng";
   totalRow.getCell(3).value = {
@@ -193,7 +205,11 @@ export async function buildPaymentRequestWorkbook(
   };
   totalRow.getCell(5).value = {
     formula: `SUM(E${firstDataRow}:E${lastDataRow})`,
-    result: totalCommission,
+    result: totalBonus,
+  };
+  totalRow.getCell(6).value = {
+    formula: `SUM(F${firstDataRow}:F${lastDataRow})`,
+    result: totalPayable,
   };
   for (let col = 1; col <= LAST_COLUMN; col += 1) {
     const cell = totalRow.getCell(col);
@@ -209,32 +225,33 @@ export async function buildPaymentRequestWorkbook(
   const amountRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.amountInWords);
   amountRow.getCell(1).value = "Đề nghị thanh toán số tiền";
   amountRow.getCell(1).font = { name: FONT, size: 12, bold: true };
-  amountRow.getCell(4).value = { formula: `E${totalRowNumber}`, result: totalCommission };
-  amountRow.getCell(4).font = { name: FONT, size: 12, bold: true };
-  amountRow.getCell(4).numFmt = MONEY_FORMAT;
-  amountRow.getCell(4).alignment = { horizontal: "right" };
-  amountRow.getCell(5).value = "đ";
-  amountRow.getCell(5).font = { name: FONT, size: 12, bold: true };
+  amountRow.getCell(6).value = { formula: `F${totalRowNumber}`, result: totalPayable };
+  amountRow.getCell(6).font = { name: FONT, size: 12, bold: true };
+  amountRow.getCell(6).numFmt = MONEY_FORMAT;
+  amountRow.getCell(6).alignment = { horizontal: "right" };
+  amountRow.getCell(7).value = "đ";
+  amountRow.getCell(7).font = { name: FONT, size: 12, bold: true };
 
   const issuedRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.issuedAt);
-  issuedRow.getCell(7).value =
+  const issuedCell = issuedRow.getCell(SIGNATURE_COLUMN);
+  issuedCell.value =
     `${city}, ngày ${String(issuedAt.getDate()).padStart(2, "0")} tháng ` +
     `${String(issuedAt.getMonth() + 1).padStart(2, "0")} năm ${issuedAt.getFullYear()}`;
-  issuedRow.getCell(7).font = { name: FONT, size: 12, bold: true };
-  issuedRow.getCell(7).alignment = { horizontal: "center" };
+  issuedCell.font = { name: FONT, size: 12, bold: true };
+  issuedCell.alignment = { horizontal: "center" };
 
   const signatureRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.signatureLabels);
   signatureRow.getCell(3).value = "Tổng giám đốc duyệt";
   signatureRow.getCell(3).font = { name: FONT, size: 12, bold: true };
   signatureRow.getCell(3).alignment = { horizontal: "center" };
-  signatureRow.getCell(7).value = "Người đề nghị";
-  signatureRow.getCell(7).font = { name: FONT, size: 12, bold: true };
-  signatureRow.getCell(7).alignment = { horizontal: "center" };
+  signatureRow.getCell(SIGNATURE_COLUMN).value = "Người đề nghị";
+  signatureRow.getCell(SIGNATURE_COLUMN).font = { name: FONT, size: 12, bold: true };
+  signatureRow.getCell(SIGNATURE_COLUMN).alignment = { horizontal: "center" };
 
   const nameRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.requesterName);
-  nameRow.getCell(7).value = requesterName;
-  nameRow.getCell(7).font = { name: FONT, size: 12 };
-  nameRow.getCell(7).alignment = { horizontal: "center" };
+  nameRow.getCell(SIGNATURE_COLUMN).value = requesterName;
+  nameRow.getCell(SIGNATURE_COLUMN).font = { name: FONT, size: 12 };
+  nameRow.getCell(SIGNATURE_COLUMN).alignment = { horizontal: "center" };
 
   // writeBuffer() trả Node Buffer (view trên pool chung) — copy sang ArrayBuffer
   // riêng để dùng trực tiếp làm body của Response.
