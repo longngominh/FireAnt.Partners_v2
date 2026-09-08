@@ -65,12 +65,18 @@ export const COLLABORATOR_COMMISSION_BANDS: readonly CommissionBand[] = [
 // Backward-compatible alias for existing imports.
 export const COMMISSION_BANDS = SALES_EMPLOYEE_COMMISSION_BANDS;
 
-const FIXED_SALARY: Record<PartnerType, number> = {
+export const FIXED_SALARY: Record<PartnerType, number> = {
   sales_employee: 6_000_000,
   collaborator: 0,
 };
 
-const PERFORMANCE_BONUSES: Record<PartnerType, Array<{ revenue: number; bonus: number }>> = {
+/** Doanh số vượt mốc này thì tổng thu nhập tháng cố định = 18% doanh số. */
+export const FLAT_RATE_THRESHOLD = 250_000_000;
+export const FLAT_RATE = 0.18;
+
+export type PerformanceBonusTier = { revenue: number; bonus: number };
+
+export const PERFORMANCE_BONUSES: Record<PartnerType, PerformanceBonusTier[]> = {
   sales_employee: [
     { revenue: 110_000_000, bonus: 1_000_000 },
     { revenue: 130_000_000, bonus: 2_000_000 },
@@ -95,10 +101,51 @@ export function normalizePartnerType(value: unknown): PartnerType {
   return value === "sales_employee" ? "sales_employee" : "collaborator";
 }
 
-function getBands(partnerType: PartnerType): readonly CommissionBand[] {
+export function getBands(partnerType: PartnerType): readonly CommissionBand[] {
   return partnerType === "sales_employee"
     ? SALES_EMPLOYEE_COMMISSION_BANDS
     : COLLABORATOR_COMMISSION_BANDS;
+}
+
+export type CommissionBandBreakdown = CommissionBand & {
+  /** Phần doanh số tháng rơi vào bậc này. */
+  amount: number;
+  /** Hoa hồng của riêng phần doanh số đó (chưa làm tròn). */
+  commission: number;
+};
+
+/**
+ * Phân rã doanh số tháng theo từng bậc — dùng để giải thích con số hoa hồng
+ * trên giấy đề nghị thanh toán. Chỉ trả về các bậc có doanh số > 0.
+ * Σ commission (làm tròn xuống) = calcCommissionFromTotal.
+ */
+export function explainCommission(
+  monthlyRevenue: number,
+  partnerType: PartnerType,
+): CommissionBandBreakdown[] {
+  const revenue = Math.max(0, monthlyRevenue);
+  const parts: CommissionBandBreakdown[] = [];
+  for (const band of getBands(partnerType)) {
+    if (revenue <= band.from) break;
+    const amount = Math.min(revenue, band.to) - band.from;
+    parts.push({ ...band, amount, commission: amount * band.rate });
+  }
+  return parts;
+}
+
+/** Mốc thưởng đã đạt (cao nhất) và mốc kế tiếp chưa đạt, để giải thích cột Thưởng. */
+export function explainPerformanceBonus(
+  monthlyRevenue: number,
+  partnerType: PartnerType,
+): { reached: PerformanceBonusTier | null; next: PerformanceBonusTier | null } {
+  const tiers = PERFORMANCE_BONUSES[normalizePartnerType(partnerType)];
+  let reached: PerformanceBonusTier | null = null;
+  let next: PerformanceBonusTier | null = null;
+  for (const tier of tiers) {
+    if (monthlyRevenue >= tier.revenue) reached = tier;
+    else if (!next) next = tier;
+  }
+  return { reached, next };
 }
 
 /**
@@ -163,8 +210,8 @@ export function calcMonthlyRemuneration(
   const normalizedType = normalizePartnerType(partnerType);
   const revenue = Math.max(0, monthlyRevenue);
 
-  if (revenue > 250_000_000) {
-    const total = Math.floor(revenue * 0.18);
+  if (revenue > FLAT_RATE_THRESHOLD) {
+    const total = Math.floor(revenue * FLAT_RATE);
     const baseSalary = FIXED_SALARY[normalizedType];
     const commission = calcCommissionFromTotal(revenue, normalizedType);
     return {

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { getPartnerPaymentInfoMap } from "@/lib/data/partner-payment-info";
-import { getMonthlyRevenueReport } from "@/lib/data/revenue";
+import { getMonthlyRevenueReport, listMonthlyPaidOrders } from "@/lib/data/revenue";
 import {
   filterRevenueRows,
   parseRevenueFilters,
@@ -47,7 +47,17 @@ export async function GET(request: Request) {
     });
   }
 
-  const paymentInfo = await getPartnerPaymentInfoMap();
+  const [paymentInfo, orders] = await Promise.all([
+    getPartnerPaymentInfoMap(),
+    listMonthlyPaidOrders(month),
+  ]);
+  const ordersByPartner = new Map<number, typeof orders>();
+  for (const order of orders) {
+    const list = ordersByPartner.get(order.partnerId);
+    if (list) list.push(order);
+    else ordersByPartner.set(order.partnerId, [order]);
+  }
+
   const bytes = await buildPaymentRequestWorkbook({
     month,
     requesterName: raw.requesterName?.trim() || session.user.name || "",
@@ -59,11 +69,13 @@ export async function GET(request: Request) {
       return {
         fullName: info?.fullName ?? row.name ?? row.username,
         username: row.username,
+        partnerType: row.partnerType,
         revenue: row.revenue,
         commission: row.remuneration.commission,
         bonus: row.remuneration.performanceBonus,
         bankAccountNumber: info?.bankAccountNumber ?? "",
         bankName: info?.bankName ?? "",
+        orders: ordersByPartner.get(row.partnerId) ?? [],
       };
     }),
   });

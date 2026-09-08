@@ -169,6 +169,111 @@ export function sumMonthlyTotals(rows: MonthlyPartnerRevenue[]): MonthlyRevenueT
   );
 }
 
+export type MonthlyPaidOrder = {
+  partnerId: number;
+  orderId: number;
+  orderDate: Date;
+  couponCode: string | null;
+  customerUserName: string | null;
+  packageName: string | null;
+  /** Giá niêm yết của gói — để đối chiếu với doanh thu thực thu của đơn nâng cấp. */
+  listAmount: number;
+  amount: number;
+};
+
+type MonthlyPaidOrderRow = {
+  PartnerId: number;
+  OrderID: number;
+  OrderDate: Date;
+  CouponCode: string | null;
+  CustomerUserName: string | null;
+  PackageName: string | null;
+  ListAmount: number | null;
+  Amount: number | null;
+};
+
+/** Bản inline của usp_ListPartnerMonthlyOrders — dùng khi DB chưa có SP này. */
+const FALLBACK_ORDERS_QUERY = `
+  WITH PaidOrders AS (
+    SELECT
+      o.OrderID, o.OrderDate, o.UserName, o.CouponCode,
+      pkg.PackageName,
+      pkg.Amount AS ListAmount,
+      CASE
+        WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
+          THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
+        ELSE ISNULL(pkg.Amount, 0)
+      END AS Amount
+    FROM [EStocks_Data].[dbo].[service_Orders] o
+    LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    OUTER APPLY (
+      SELECT SUM(up.Amount) AS Amount
+      FROM [EStocks_Data].[dbo].[service_Upgrades] up
+      WHERE up.OrderID = o.OrderID
+    ) upg
+    WHERE o.IsPaid = 1
+  ),
+  PaidOrderIds AS (
+    SELECT cp.CouponID, cp.PartnerId, MAX(so.OrderID) AS OrderID
+    FROM Coupons cp
+    INNER JOIN PaidOrders so ON so.CouponCode = cp.CouponCode
+    WHERE cp.IsUsed = 1
+    GROUP BY cp.CouponID, cp.PartnerId
+  )
+  SELECT
+    poi.PartnerId, o.OrderID, o.OrderDate, o.CouponCode,
+    o.UserName AS CustomerUserName, o.PackageName, o.ListAmount, o.Amount
+  FROM PaidOrderIds poi
+  INNER JOIN PaidOrders o ON o.OrderID = poi.OrderID
+  WHERE o.OrderDate >= @MonthStart
+    AND o.OrderDate <  @MonthEnd
+  ORDER BY poi.PartnerId, o.OrderDate, o.OrderID;
+`;
+
+/**
+ * Từng đơn đã thanh toán của mọi CTV trong tháng — cùng cách chọn đơn với
+ * getMonthlyRevenueReport nên tổng theo CTV khớp cột Doanh số của bảng kê.
+ * Dùng cho sheet "Bảng kê đơn hàng" của giấy đề nghị thanh toán.
+ */
+export async function listMonthlyPaidOrders(month: MonthKey): Promise<MonthlyPaidOrder[]> {
+  const { start, end } = monthRange(normalizeMonthKey(month));
+  try {
+    const pool = await getPool();
+    const buildRequest = () =>
+      pool
+        .request()
+        .input("MonthStart", sql.DateTime, start)
+        .input("MonthEnd", sql.DateTime, end);
+
+    let recordset: MonthlyPaidOrderRow[];
+    try {
+      const res = await buildRequest().execute<MonthlyPaidOrderRow>("usp_ListPartnerMonthlyOrders");
+      recordset = res.recordset;
+    } catch (err) {
+      console.warn(
+        "[listMonthlyPaidOrders] usp_ListPartnerMonthlyOrders không khả dụng, dùng query inline",
+        err,
+      );
+      const res = await buildRequest().query<MonthlyPaidOrderRow>(FALLBACK_ORDERS_QUERY);
+      recordset = res.recordset;
+    }
+
+    return recordset.map((r) => ({
+      partnerId: r.PartnerId,
+      orderId: r.OrderID,
+      orderDate: r.OrderDate,
+      couponCode: r.CouponCode ?? null,
+      customerUserName: r.CustomerUserName ?? null,
+      packageName: r.PackageName ?? null,
+      listAmount: r.ListAmount ?? 0,
+      amount: r.Amount ?? 0,
+    }));
+  } catch (err) {
+    console.error("[listMonthlyPaidOrders]", err);
+    return [];
+  }
+}
+
 /**
  * Doanh thu + hoa hồng của cộng tác viên trong 1 tháng dương lịch.
  *

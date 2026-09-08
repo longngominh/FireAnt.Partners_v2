@@ -1,16 +1,41 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import {
+  COLLABORATOR_COMMISSION_BANDS,
+  explainCommission,
+  explainPerformanceBonus,
+  FIXED_SALARY,
+  FLAT_RATE,
+  FLAT_RATE_THRESHOLD,
+  PARTNER_TYPE_LABELS,
+  PERFORMANCE_BONUSES,
+  SALES_EMPLOYEE_COMMISSION_BANDS,
+  type PartnerType,
+} from "@/lib/commission";
 import { monthRange, parseMonthKey, type MonthKey } from "@/lib/utils/month";
+
+export type PaymentRequestOrder = {
+  orderId: number;
+  orderDate: Date;
+  couponCode: string | null;
+  customerUserName: string | null;
+  packageName: string | null;
+  listAmount: number;
+  amount: number;
+};
 
 export type PaymentRequestRow = {
   fullName: string;
   username: string;
+  partnerType: PartnerType;
   revenue: number;
   commission: number;
   bonus: number;
   bankAccountNumber: string;
   bankName: string;
+  /** Đơn đã thanh toán trong tháng — sheet "Bảng kê đơn hàng". */
+  orders: PaymentRequestOrder[];
 };
 
 export type PaymentRequestInput = {
@@ -24,12 +49,21 @@ export type PaymentRequestInput = {
 
 const FONT = "Times New Roman";
 const MONEY_FORMAT = "#,##0";
+const PERCENT_FORMAT = "0.0%";
 const THIN_BORDER: Partial<ExcelJS.Borders> = {
   top: { style: "thin" },
   left: { style: "thin" },
   bottom: { style: "thin" },
   right: { style: "thin" },
 };
+const HEADER_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFEFEFEF" },
+};
+
+const EXPLANATION_SHEET = "Cách tính";
+const ORDERS_SHEET = "Bảng kê đơn hàng";
 
 // A Họ tên | B Tk FireAnt | C Doanh số | D Hoa hồng | E Thưởng | F Thanh toán (= D + E)
 // G Số tài khoản | H Ngân hàng | I Nội dung CK
@@ -48,6 +82,7 @@ const SIGNATURE_COLUMN = 8;
 
 // Vị trí các khối phía dưới, đếm từ dòng "Tổng" (đúng như file mẫu).
 const OFFSET_AFTER_TOTAL = {
+  sheetNote: 1,
   amountInWords: 3,
   issuedAt: 5,
   signatureLabels: 6,
@@ -60,9 +95,29 @@ function dmy(date: Date): string {
   return `${day}/${month}/${date.getFullYear()}`;
 }
 
+/** Ghi dạng chuỗi: exceljs đổi Date sang serial theo UTC nên giờ VN sẽ lệch 7 tiếng. */
+function dmyHm(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${dmy(date)} ${hours}:${minutes}`;
+}
+
+const VND = new Intl.NumberFormat("vi-VN");
+function money(value: number): string {
+  return `${VND.format(Math.round(value))} đ`;
+}
+
+function percent(rate: number): string {
+  return `${(rate * 100).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+}
+
 function transferNote(month: MonthKey): string {
   const { year, month: monthNumber } = parseMonthKey(month);
   return `Hoa hồng CTV T${monthNumber}/${year}`;
+}
+
+function partnerLabel(row: PaymentRequestRow): string {
+  return `${row.fullName} (${row.username})`;
 }
 
 /** Trả về data URL base64 — exceljs khai báo global `Buffer extends ArrayBuffer`, đưa
@@ -77,17 +132,48 @@ async function readLogo(): Promise<string | null> {
   }
 }
 
-export async function buildPaymentRequestWorkbook(
+type CellStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  size?: number;
+  align?: ExcelJS.Alignment["horizontal"];
+  wrap?: boolean;
+  numFmt?: string;
+  border?: boolean;
+  fill?: boolean;
+};
+
+function styleCell(cell: ExcelJS.Cell, style: CellStyle = {}): void {
+  cell.font = { name: FONT, size: style.size ?? 12, bold: style.bold, italic: style.italic };
+  if (style.align || style.wrap) {
+    cell.alignment = { horizontal: style.align, vertical: "middle", wrapText: style.wrap };
+  }
+  if (style.numFmt) cell.numFmt = style.numFmt;
+  if (style.border) cell.border = THIN_BORDER;
+  if (style.fill) cell.fill = HEADER_FILL;
+}
+
+function writeHeaderRow(sheet: ExcelJS.Worksheet, rowNumber: number, labels: string[]): void {
+  const row = sheet.getRow(rowNumber);
+  labels.forEach((label, index) => {
+    const cell = row.getCell(index + 1);
+    cell.value = label;
+    styleCell(cell, { bold: true, align: "center", wrap: true, border: true, fill: true });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 1 — Giấy đề nghị thanh toán
+// ---------------------------------------------------------------------------
+
+async function buildRequestSheet(
+  workbook: ExcelJS.Workbook,
   input: PaymentRequestInput,
-): Promise<ArrayBuffer> {
+): Promise<void> {
   const { month, rows, requesterName, department, city, issuedAt } = input;
   const { year, month: monthNumber } = parseMonthKey(month);
   const { start, end } = monthRange(month);
   const lastDay = new Date(end.getTime() - 1);
-
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "FireAnt Partners";
-  workbook.created = issuedAt;
 
   const sheet = workbook.addWorksheet(`T${monthNumber}-${year}`);
   COLUMN_WIDTHS.forEach((width, index) => {
@@ -222,6 +308,13 @@ export async function buildPaymentRequestWorkbook(
     }
   }
 
+  const noteRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.sheetNote);
+  sheet.mergeCells(noteRow.number, 1, noteRow.number, LAST_COLUMN);
+  noteRow.getCell(1).value =
+    `Cách tính hoa hồng, thưởng theo bậc của từng CTV xem sheet "${EXPLANATION_SHEET}"; ` +
+    `chi tiết đơn hàng đã thanh toán xem sheet "${ORDERS_SHEET}".`;
+  styleCell(noteRow.getCell(1), { italic: true, size: 11 });
+
   const amountRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.amountInWords);
   amountRow.getCell(1).value = "Đề nghị thanh toán số tiền";
   amountRow.getCell(1).font = { name: FONT, size: 12, bold: true };
@@ -252,6 +345,396 @@ export async function buildPaymentRequestWorkbook(
   nameRow.getCell(SIGNATURE_COLUMN).value = requesterName;
   nameRow.getCell(SIGNATURE_COLUMN).font = { name: FONT, size: 12 };
   nameRow.getCell(SIGNATURE_COLUMN).alignment = { horizontal: "center" };
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 2 — Giải thích cách tính hoa hồng & thưởng theo bậc
+// ---------------------------------------------------------------------------
+
+// A Bậc | B Từ | C Đến | D Tỷ lệ | E Doanh số trong bậc | F Hoa hồng
+const EXPLANATION_WIDTHS = [30, 18, 18, 10, 22, 18];
+const EXPLANATION_LAST_COLUMN = 6;
+
+function bandUpperLabel(to: number): string | number {
+  return Number.isFinite(to) ? to : "trở lên";
+}
+
+function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput): void {
+  const { month, rows } = input;
+  const { year, month: monthNumber } = parseMonthKey(month);
+  const sheet = workbook.addWorksheet(EXPLANATION_SHEET);
+  EXPLANATION_WIDTHS.forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+
+  let rowNumber = 1;
+  const mergeAcross = (r: number) => sheet.mergeCells(r, 1, r, EXPLANATION_LAST_COLUMN);
+
+  mergeAcross(rowNumber);
+  sheet.getCell(rowNumber, 1).value =
+    `CÁCH TÍNH HOA HỒNG & THƯỞNG THEO BẬC — THÁNG ${monthNumber}/${year}`;
+  styleCell(sheet.getCell(rowNumber, 1), { bold: true, size: 14, align: "center" });
+  rowNumber += 2;
+
+  const principles = [
+    "1. Hoa hồng tính lũy tiến từng phần: doanh số tháng được chia vào các bậc, phần " +
+      "doanh số nằm trong mỗi bậc nhân với tỷ lệ của bậc đó rồi cộng lại. Doanh số " +
+      "tích lũy reset về 0 vào đầu mỗi tháng.",
+    "2. Thưởng bán tốt: hưởng theo mốc doanh số tháng cao nhất đã đạt (không cộng dồn " +
+      "các mốc). Bảng mốc thưởng ở cuối sheet.",
+    `3. Doanh số trên ${money(FLAT_RATE_THRESHOLD)}: tổng thu nhập tháng = ` +
+      `${percent(FLAT_RATE)} doanh số; thưởng = tổng − hoa hồng (− lương cứng nếu là ` +
+      `${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()}).`,
+    `4. Lương cứng ${money(FIXED_SALARY.sales_employee)} của ` +
+      `${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()} trả qua bảng lương, không nằm ` +
+      "trong giấy đề nghị này. Số thanh toán = Hoa hồng + Thưởng.",
+  ];
+  for (const text of principles) {
+    mergeAcross(rowNumber);
+    sheet.getCell(rowNumber, 1).value = text;
+    styleCell(sheet.getCell(rowNumber, 1), { wrap: true, align: "left" });
+    // Dòng dài phải đặt height vì Excel không tự fit ô đã merge.
+    sheet.getRow(rowNumber).height = 34;
+    rowNumber += 1;
+  }
+  rowNumber += 1;
+
+  rows.forEach((row, index) => {
+    mergeAcross(rowNumber);
+    sheet.getCell(rowNumber, 1).value =
+      `${index + 1}. ${partnerLabel(row)} — ${PARTNER_TYPE_LABELS[row.partnerType]} — ` +
+      `Doanh số tháng: ${money(row.revenue)}`;
+    styleCell(sheet.getCell(rowNumber, 1), { bold: true, align: "left", fill: true });
+    rowNumber += 1;
+
+    writeHeaderRow(sheet, rowNumber, [
+      "Bậc doanh số",
+      "Từ",
+      "Đến",
+      "Tỷ lệ",
+      "Doanh số trong bậc",
+      "Hoa hồng",
+    ]);
+    rowNumber += 1;
+
+    const parts = explainCommission(row.revenue, row.partnerType);
+    const firstBandRow = rowNumber;
+    // Bậc cuối lấy phần dư để tổng các bậc khớp tuyệt đối với hoa hồng đã tính.
+    let allocated = 0;
+    parts.forEach((part, partIndex) => {
+      const isLast = partIndex === parts.length - 1;
+      const commission = isLast ? row.commission - allocated : Math.floor(part.commission);
+      allocated += commission;
+
+      const r = sheet.getRow(rowNumber);
+      r.getCell(1).value = `Bậc ${partIndex + 1}`;
+      r.getCell(2).value = part.from;
+      r.getCell(3).value = bandUpperLabel(part.to);
+      r.getCell(4).value = part.rate;
+      r.getCell(5).value = part.amount;
+      r.getCell(6).value = commission;
+      styleCell(r.getCell(1), { border: true });
+      styleCell(r.getCell(2), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+      styleCell(r.getCell(3), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+      styleCell(r.getCell(4), { border: true, numFmt: PERCENT_FORMAT, align: "right" });
+      styleCell(r.getCell(5), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+      styleCell(r.getCell(6), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+      rowNumber += 1;
+    });
+    const lastBandRow = rowNumber - 1;
+
+    const commissionRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, 4);
+    commissionRow.getCell(1).value = "Tổng hoa hồng";
+    commissionRow.getCell(5).value =
+      parts.length > 0
+        ? { formula: `SUM(E${firstBandRow}:E${lastBandRow})`, result: row.revenue }
+        : row.revenue;
+    commissionRow.getCell(6).value =
+      parts.length > 0
+        ? { formula: `SUM(F${firstBandRow}:F${lastBandRow})`, result: row.commission }
+        : row.commission;
+    for (let col = 1; col <= EXPLANATION_LAST_COLUMN; col += 1) {
+      styleCell(commissionRow.getCell(col), {
+        bold: true,
+        border: true,
+        numFmt: col >= 5 ? MONEY_FORMAT : undefined,
+        align: col >= 5 ? "right" : "left",
+      });
+    }
+    rowNumber += 1;
+
+    const bonusRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, 5);
+    bonusRow.getCell(1).value = `Thưởng: ${describeBonus(row)}`;
+    bonusRow.getCell(6).value = row.bonus;
+    styleCell(bonusRow.getCell(1), { border: true, wrap: true, align: "left" });
+    styleCell(bonusRow.getCell(6), { bold: true, border: true, numFmt: MONEY_FORMAT, align: "right" });
+    rowNumber += 1;
+
+    const payRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, 5);
+    payRow.getCell(1).value = "Thanh toán = Hoa hồng + Thưởng";
+    payRow.getCell(6).value = {
+      formula: `F${rowNumber - 2}+F${rowNumber - 1}`,
+      result: row.commission + row.bonus,
+    };
+    styleCell(payRow.getCell(1), { bold: true, border: true, align: "left", fill: true });
+    styleCell(payRow.getCell(6), { bold: true, border: true, numFmt: MONEY_FORMAT, align: "right", fill: true });
+    rowNumber += 2;
+  });
+
+  // Bảng bậc tham chiếu.
+  mergeAcross(rowNumber);
+  sheet.getCell(rowNumber, 1).value = "BẢNG BẬC HOA HỒNG (áp dụng lũy tiến từng phần)";
+  styleCell(sheet.getCell(rowNumber, 1), { bold: true, align: "left" });
+  rowNumber += 1;
+  writeHeaderRow(sheet, rowNumber, [
+    "Bậc",
+    "Từ",
+    "Đến",
+    `Tỷ lệ ${PARTNER_TYPE_LABELS.collaborator}`,
+    `Tỷ lệ ${PARTNER_TYPE_LABELS.sales_employee}`,
+  ]);
+  rowNumber += 1;
+  COLLABORATOR_COMMISSION_BANDS.forEach((band, index) => {
+    const r = sheet.getRow(rowNumber);
+    r.getCell(1).value = `Bậc ${index + 1}`;
+    r.getCell(2).value = band.from;
+    r.getCell(3).value = bandUpperLabel(band.to);
+    r.getCell(4).value = band.rate;
+    r.getCell(5).value = SALES_EMPLOYEE_COMMISSION_BANDS[index]?.rate ?? 0;
+    styleCell(r.getCell(1), { border: true });
+    styleCell(r.getCell(2), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+    styleCell(r.getCell(3), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+    styleCell(r.getCell(4), { border: true, numFmt: PERCENT_FORMAT, align: "right" });
+    styleCell(r.getCell(5), { border: true, numFmt: PERCENT_FORMAT, align: "right" });
+    rowNumber += 1;
+  });
+  rowNumber += 1;
+
+  mergeAcross(rowNumber);
+  sheet.getCell(rowNumber, 1).value = "MỐC THƯỞNG BÁN TỐT (theo doanh số tháng đạt được)";
+  styleCell(sheet.getCell(rowNumber, 1), { bold: true, align: "left" });
+  rowNumber += 1;
+  writeHeaderRow(sheet, rowNumber, [
+    "Doanh số tháng đạt từ",
+    `Thưởng ${PARTNER_TYPE_LABELS.collaborator}`,
+    `Thưởng ${PARTNER_TYPE_LABELS.sales_employee}`,
+  ]);
+  rowNumber += 1;
+  const thresholds = [
+    ...new Set(
+      [...PERFORMANCE_BONUSES.collaborator, ...PERFORMANCE_BONUSES.sales_employee].map(
+        (tier) => tier.revenue,
+      ),
+    ),
+  ].sort((a, b) => a - b);
+  for (const threshold of thresholds) {
+    const r = sheet.getRow(rowNumber);
+    r.getCell(1).value = threshold;
+    r.getCell(2).value =
+      PERFORMANCE_BONUSES.collaborator.find((tier) => tier.revenue === threshold)?.bonus ?? 0;
+    r.getCell(3).value =
+      PERFORMANCE_BONUSES.sales_employee.find((tier) => tier.revenue === threshold)?.bonus ?? 0;
+    for (let col = 1; col <= 3; col += 1) {
+      styleCell(r.getCell(col), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+    }
+    rowNumber += 1;
+  }
+}
+
+function describeBonus(row: PaymentRequestRow): string {
+  const { revenue, partnerType, commission, bonus } = row;
+  if (revenue > FLAT_RATE_THRESHOLD) {
+    const total = Math.floor(revenue * FLAT_RATE);
+    const salaryNote =
+      FIXED_SALARY[partnerType] > 0 ? ` − lương cứng ${money(FIXED_SALARY[partnerType])}` : "";
+    return (
+      `doanh số ${money(revenue)} vượt ${money(FLAT_RATE_THRESHOLD)} nên tổng thu nhập = ` +
+      `${percent(FLAT_RATE)} × doanh số = ${money(total)}; thưởng = ${money(total)} − hoa hồng ` +
+      `${money(commission)}${salaryNote} = ${money(bonus)}.`
+    );
+  }
+  const { reached, next } = explainPerformanceBonus(revenue, partnerType);
+  if (reached) {
+    const nextNote = next
+      ? ` Mốc kế tiếp: ${money(next.revenue)} → thưởng ${money(next.bonus)}.`
+      : "";
+    return (
+      `doanh số ${money(revenue)} đạt mốc ${money(reached.revenue)} → thưởng ` +
+      `${money(reached.bonus)}.${nextNote}`
+    );
+  }
+  return next
+    ? `doanh số ${money(revenue)} chưa đạt mốc thưởng thấp nhất ${money(next.revenue)} ` +
+        `(thưởng ${money(next.bonus)}).`
+    : "không có mốc thưởng áp dụng.";
+}
+
+// ---------------------------------------------------------------------------
+// Sheet 3 — Bảng kê đơn hàng đã thanh toán
+// ---------------------------------------------------------------------------
+
+// A STT | B Cộng tác viên | C Tk FireAnt | D Mã đơn | E Ngày thanh toán | F Khách hàng
+// G Gói | H Mã coupon | I Giá niêm yết | J Doanh thu
+const ORDER_WIDTHS = [6, 28, 22, 12, 18, 24, 30, 22, 16, 16];
+const ORDER_LAST_COLUMN = 10;
+const ORDER_MONEY_COLUMNS = [9, 10];
+
+function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput): void {
+  const { month, rows } = input;
+  const { start, end } = monthRange(month);
+  const lastDay = new Date(end.getTime() - 1);
+  const sheet = workbook.addWorksheet(ORDERS_SHEET);
+  ORDER_WIDTHS.forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+
+  sheet.mergeCells(1, 1, 1, ORDER_LAST_COLUMN);
+  sheet.getCell(1, 1).value =
+    `BẢNG KÊ ĐƠN HÀNG ĐÃ THANH TOÁN TỪ ${dmy(start)} ĐẾN ${dmy(lastDay)}`;
+  styleCell(sheet.getCell(1, 1), { bold: true, size: 14, align: "center" });
+
+  sheet.mergeCells(2, 1, 2, ORDER_LAST_COLUMN);
+  sheet.getCell(2, 1).value =
+    "Mỗi coupon tính một đơn đã thanh toán mới nhất, quy về tháng theo ngày thanh toán. " +
+    "Doanh thu là số thực thu (đơn nâng cấp chỉ tính phần chênh lệch), Giá niêm yết để đối chiếu.";
+  styleCell(sheet.getCell(2, 1), { italic: true, size: 11, wrap: true, align: "left" });
+  sheet.getRow(2).height = 30;
+
+  const headerRowNumber = 4;
+  writeHeaderRow(sheet, headerRowNumber, [
+    "STT",
+    "Cộng tác viên",
+    "Tk FireAnt",
+    "Mã đơn",
+    "Ngày thanh toán",
+    "Khách hàng",
+    "Gói",
+    "Mã coupon",
+    "Giá niêm yết",
+    "Doanh thu",
+  ]);
+  sheet.views = [{ state: "frozen", ySplit: headerRowNumber }];
+
+  let rowNumber = headerRowNumber + 1;
+  const subtotalRows: number[] = [];
+
+  rows.forEach((row, index) => {
+    const groupRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, ORDER_LAST_COLUMN);
+    groupRow.getCell(1).value =
+      `${index + 1}. ${partnerLabel(row)} — ${row.orders.length} đơn`;
+    styleCell(groupRow.getCell(1), { bold: true, align: "left", fill: true, border: true });
+    rowNumber += 1;
+
+    const firstOrderRow = rowNumber;
+    row.orders.forEach((order, orderIndex) => {
+      const r = sheet.getRow(rowNumber);
+      r.getCell(1).value = orderIndex + 1;
+      r.getCell(2).value = row.fullName;
+      r.getCell(3).value = row.username;
+      r.getCell(4).value = order.orderId;
+      r.getCell(5).value = dmyHm(order.orderDate);
+      r.getCell(6).value = order.customerUserName ?? "";
+      r.getCell(7).value = order.packageName ?? "";
+      r.getCell(8).value = order.couponCode ?? "";
+      r.getCell(9).value = order.listAmount;
+      r.getCell(10).value = order.amount;
+      for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
+        const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+        styleCell(r.getCell(col), {
+          border: true,
+          numFmt: isMoney ? MONEY_FORMAT : undefined,
+          align: isMoney ? "right" : col === 1 || col === 4 || col === 5 ? "center" : "left",
+        });
+      }
+      rowNumber += 1;
+    });
+    const lastOrderRow = rowNumber - 1;
+
+    const subtotal = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, 8);
+    subtotal.getCell(1).value = `Cộng ${row.fullName}`;
+    const orderRevenue = row.orders.reduce((sum, order) => sum + order.amount, 0);
+    if (row.orders.length > 0) {
+      subtotal.getCell(9).value = {
+        formula: `SUM(I${firstOrderRow}:I${lastOrderRow})`,
+        result: row.orders.reduce((sum, order) => sum + order.listAmount, 0),
+      };
+      subtotal.getCell(10).value = {
+        formula: `SUM(J${firstOrderRow}:J${lastOrderRow})`,
+        result: orderRevenue,
+      };
+    } else {
+      subtotal.getCell(9).value = 0;
+      subtotal.getCell(10).value = 0;
+    }
+    for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
+      const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+      styleCell(subtotal.getCell(col), {
+        bold: true,
+        border: true,
+        numFmt: isMoney ? MONEY_FORMAT : undefined,
+        align: isMoney ? "right" : "left",
+      });
+    }
+    subtotalRows.push(rowNumber);
+    rowNumber += 1;
+
+    // Cảnh báo khi bảng kê đơn không khớp doanh số trên giấy đề nghị.
+    if (orderRevenue !== row.revenue) {
+      sheet.mergeCells(rowNumber, 1, rowNumber, ORDER_LAST_COLUMN);
+      sheet.getCell(rowNumber, 1).value =
+        `Lưu ý: tổng đơn ${money(orderRevenue)} khác doanh số trên giấy đề nghị ` +
+        `${money(row.revenue)}.`;
+      styleCell(sheet.getCell(rowNumber, 1), { italic: true, size: 11, align: "left" });
+      rowNumber += 1;
+    }
+    rowNumber += 1;
+  });
+
+  const grand = sheet.getRow(rowNumber);
+  sheet.mergeCells(rowNumber, 1, rowNumber, 8);
+  grand.getCell(1).value = `TỔNG CỘNG — ${rows.reduce((sum, row) => sum + row.orders.length, 0)} đơn`;
+  const sumFormula = (column: string) =>
+    subtotalRows.length > 0 ? subtotalRows.map((r) => `${column}${r}`).join("+") : "0";
+  grand.getCell(9).value = {
+    formula: sumFormula("I"),
+    result: rows.reduce(
+      (sum, row) => sum + row.orders.reduce((s, order) => s + order.listAmount, 0),
+      0,
+    ),
+  };
+  grand.getCell(10).value = {
+    formula: sumFormula("J"),
+    result: rows.reduce((sum, row) => sum + row.orders.reduce((s, order) => s + order.amount, 0), 0),
+  };
+  for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
+    const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+    styleCell(grand.getCell(col), {
+      bold: true,
+      border: true,
+      fill: true,
+      numFmt: isMoney ? MONEY_FORMAT : undefined,
+      align: isMoney ? "right" : "left",
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+export async function buildPaymentRequestWorkbook(
+  input: PaymentRequestInput,
+): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "FireAnt Partners";
+  workbook.created = input.issuedAt;
+
+  await buildRequestSheet(workbook, input);
+  buildExplanationSheet(workbook, input);
+  buildOrdersSheet(workbook, input);
 
   // writeBuffer() trả Node Buffer (view trên pool chung) — copy sang ArrayBuffer
   // riêng để dùng trực tiếp làm body của Response.
