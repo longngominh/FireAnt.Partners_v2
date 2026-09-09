@@ -21,7 +21,6 @@ export type PaymentRequestOrder = {
   couponCode: string | null;
   customerUserName: string | null;
   packageName: string | null;
-  listAmount: number;
   amount: number;
 };
 
@@ -577,10 +576,11 @@ function describeBonus(row: PaymentRequestRow): string {
 // ---------------------------------------------------------------------------
 
 // A STT | B Cộng tác viên | C Tk FireAnt | D Mã đơn | E Ngày thanh toán | F Khách hàng
-// G Gói | H Mã coupon | I Giá niêm yết | J Doanh thu
-const ORDER_WIDTHS = [6, 28, 22, 12, 18, 24, 30, 22, 16, 16];
-const ORDER_LAST_COLUMN = 10;
-const ORDER_MONEY_COLUMNS = [9, 10];
+// G Gói | H Mã coupon | I Doanh thu
+const ORDER_WIDTHS = [6, 28, 22, 12, 18, 24, 30, 22, 16];
+const ORDER_LAST_COLUMN = 9;
+const ORDER_MONEY_COLUMN = 9;
+const ORDER_LABEL_SPAN = ORDER_MONEY_COLUMN - 1;
 
 function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput): void {
   const { month, rows } = input;
@@ -599,7 +599,7 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
   sheet.mergeCells(2, 1, 2, ORDER_LAST_COLUMN);
   sheet.getCell(2, 1).value =
     "Mỗi coupon tính một đơn đã thanh toán mới nhất, quy về tháng theo ngày thanh toán. " +
-    "Doanh thu là số thực thu (đơn nâng cấp chỉ tính phần chênh lệch), Giá niêm yết để đối chiếu.";
+    "Doanh thu là số thực thu của đơn (đơn nâng cấp chỉ tính phần chênh lệch khách đã trả).";
   styleCell(sheet.getCell(2, 1), { italic: true, size: 11, wrap: true, align: "left" });
   sheet.getRow(2).height = 30;
 
@@ -613,7 +613,6 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
     "Khách hàng",
     "Gói",
     "Mã coupon",
-    "Giá niêm yết",
     "Doanh thu",
   ]);
   sheet.views = [{ state: "frozen", ySplit: headerRowNumber }];
@@ -640,10 +639,9 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
       r.getCell(6).value = order.customerUserName ?? "";
       r.getCell(7).value = order.packageName ?? "";
       r.getCell(8).value = order.couponCode ?? "";
-      r.getCell(9).value = order.listAmount;
-      r.getCell(10).value = order.amount;
+      r.getCell(ORDER_MONEY_COLUMN).value = order.amount;
       for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
-        const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+        const isMoney = col === ORDER_MONEY_COLUMN;
         styleCell(r.getCell(col), {
           border: true,
           numFmt: isMoney ? MONEY_FORMAT : undefined,
@@ -655,24 +653,15 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
     const lastOrderRow = rowNumber - 1;
 
     const subtotal = sheet.getRow(rowNumber);
-    sheet.mergeCells(rowNumber, 1, rowNumber, 8);
+    sheet.mergeCells(rowNumber, 1, rowNumber, ORDER_LABEL_SPAN);
     subtotal.getCell(1).value = `Cộng ${row.fullName}`;
     const orderRevenue = row.orders.reduce((sum, order) => sum + order.amount, 0);
-    if (row.orders.length > 0) {
-      subtotal.getCell(9).value = {
-        formula: `SUM(I${firstOrderRow}:I${lastOrderRow})`,
-        result: row.orders.reduce((sum, order) => sum + order.listAmount, 0),
-      };
-      subtotal.getCell(10).value = {
-        formula: `SUM(J${firstOrderRow}:J${lastOrderRow})`,
-        result: orderRevenue,
-      };
-    } else {
-      subtotal.getCell(9).value = 0;
-      subtotal.getCell(10).value = 0;
-    }
+    subtotal.getCell(ORDER_MONEY_COLUMN).value =
+      row.orders.length > 0
+        ? { formula: `SUM(I${firstOrderRow}:I${lastOrderRow})`, result: orderRevenue }
+        : 0;
     for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
-      const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+      const isMoney = col === ORDER_MONEY_COLUMN;
       styleCell(subtotal.getCell(col), {
         bold: true,
         border: true,
@@ -696,23 +685,14 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
   });
 
   const grand = sheet.getRow(rowNumber);
-  sheet.mergeCells(rowNumber, 1, rowNumber, 8);
+  sheet.mergeCells(rowNumber, 1, rowNumber, ORDER_LABEL_SPAN);
   grand.getCell(1).value = `TỔNG CỘNG — ${rows.reduce((sum, row) => sum + row.orders.length, 0)} đơn`;
-  const sumFormula = (column: string) =>
-    subtotalRows.length > 0 ? subtotalRows.map((r) => `${column}${r}`).join("+") : "0";
-  grand.getCell(9).value = {
-    formula: sumFormula("I"),
-    result: rows.reduce(
-      (sum, row) => sum + row.orders.reduce((s, order) => s + order.listAmount, 0),
-      0,
-    ),
-  };
-  grand.getCell(10).value = {
-    formula: sumFormula("J"),
+  grand.getCell(ORDER_MONEY_COLUMN).value = {
+    formula: subtotalRows.length > 0 ? subtotalRows.map((r) => `I${r}`).join("+") : "0",
     result: rows.reduce((sum, row) => sum + row.orders.reduce((s, order) => s + order.amount, 0), 0),
   };
   for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
-    const isMoney = ORDER_MONEY_COLUMNS.includes(col);
+    const isMoney = col === ORDER_MONEY_COLUMN;
     styleCell(grand.getCell(col), {
       bold: true,
       border: true,
