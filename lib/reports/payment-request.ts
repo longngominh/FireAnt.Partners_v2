@@ -381,13 +381,14 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     "1. Hoa hồng tính lũy tiến từng phần: doanh số tháng được chia vào các bậc, phần " +
       "doanh số nằm trong mỗi bậc nhân với tỷ lệ của bậc đó rồi cộng lại. Doanh số " +
       "tích lũy reset về 0 vào đầu mỗi tháng.",
-    `2. ${PARTNER_TYPE_LABELS.collaborator}: không có thưởng riêng, mức thưởng đã gộp ` +
-      `vào tỷ lệ bậc (từ bậc ${money(130_000_000)} trở lên). ` +
-      `${PARTNER_TYPE_LABELS.sales_employee}: thưởng bán tốt theo mốc doanh số tháng cao ` +
-      "nhất đã đạt, không cộng dồn các mốc (bảng mốc ở cuối sheet).",
-    `3. Doanh số trên ${money(FLAT_RATE_THRESHOLD)}: tổng thu nhập tháng = ` +
-      `${percent(FLAT_RATE)} doanh số. ${PARTNER_TYPE_LABELS.collaborator}: toàn bộ là hoa hồng. ` +
-      `${PARTNER_TYPE_LABELS.sales_employee}: thưởng = tổng − hoa hồng theo bậc − lương cứng.`,
+    "2. Không có khoản thưởng bán tốt riêng: mức thưởng đã gộp vào tỷ lệ của các bậc " +
+      `cao (${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()} từ bậc ${money(90_000_000)}, ` +
+      `${PARTNER_TYPE_LABELS.collaborator.toLowerCase()} từ bậc ${money(130_000_000)}). ` +
+      "Bảng bậc ở cuối sheet.",
+    `3. Doanh số từ ${money(FLAT_RATE_THRESHOLD)} trở lên: không chia bậc, tổng thu nhập ` +
+      `tháng = ${percent(FLAT_RATE)} doanh số. ${PARTNER_TYPE_LABELS.collaborator}: toàn bộ là ` +
+      `hoa hồng. ${PARTNER_TYPE_LABELS.sales_employee}: hoa hồng = ${percent(FLAT_RATE)} doanh số ` +
+      `− lương cứng ${money(FIXED_SALARY.sales_employee)}.`,
     `4. Lương cứng ${money(FIXED_SALARY.sales_employee)} của ` +
       `${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()} trả qua bảng lương, không nằm ` +
       "trong giấy đề nghị này. Số thanh toán = Hoa hồng + Thưởng (nếu có).",
@@ -446,16 +447,28 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     };
 
     const firstBandRow = rowNumber;
-    if (row.revenue > FLAT_RATE_THRESHOLD && !hasBonus) {
-      // CTV vượt ngưỡng: không chia bậc, toàn bộ doanh số hưởng 18%.
+    if (row.revenue >= FLAT_RATE_THRESHOLD && !hasBonus) {
+      // Đạt ngưỡng: không chia bậc, toàn bộ doanh số hưởng 18%; NVKD trừ lương cứng
+      // (trả qua bảng lương) để ra hoa hồng thực nhận.
+      const flatTotal = Math.floor(row.revenue * FLAT_RATE);
       writeBandRow(
-        `Vượt ${money(FLAT_RATE_THRESHOLD)}`,
+        `Từ ${money(FLAT_RATE_THRESHOLD)} trở lên`,
         0,
         Infinity,
         FLAT_RATE,
         row.revenue,
-        row.commission,
+        flatTotal,
       );
+      const baseSalary = FIXED_SALARY[row.partnerType];
+      if (baseSalary > 0) {
+        const r = sheet.getRow(rowNumber);
+        sheet.mergeCells(rowNumber, 1, rowNumber, 5);
+        r.getCell(1).value = "Trừ lương cứng (đã trả qua bảng lương)";
+        r.getCell(6).value = row.commission - flatTotal;
+        styleCell(r.getCell(1), { border: true, align: "left" });
+        styleCell(r.getCell(6), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+        rowNumber += 1;
+      }
     } else {
       const parts = explainCommission(row.revenue, row.partnerType);
       // Bậc cuối lấy phần dư để tổng các bậc khớp tuyệt đối với hoa hồng đã tính.
@@ -564,7 +577,7 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     );
   });
   writeRateRow(
-    `Trên ${money(FLAT_RATE_THRESHOLD)} (*)`,
+    `Từ ${money(FLAT_RATE_THRESHOLD)} trở lên (*)`,
     FLAT_RATE_THRESHOLD,
     Infinity,
     FLAT_RATE,
@@ -572,8 +585,9 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
   );
   mergeAcross(rowNumber);
   sheet.getCell(rowNumber, 1).value =
-    `(*) Tổng thu nhập tháng cố định ${percent(FLAT_RATE)} doanh số, không chia bậc ` +
-    `(${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()}: gồm lương cứng + hoa hồng + thưởng).`;
+    `(*) Không chia bậc: tổng thu nhập tháng = ${percent(FLAT_RATE)} toàn bộ doanh số ` +
+    `(${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()}: hoa hồng = ${percent(FLAT_RATE)} ` +
+    `doanh số − lương cứng ${money(FIXED_SALARY.sales_employee)}).`;
   styleCell(sheet.getCell(rowNumber, 1), { italic: true, size: 11, align: "left" });
   rowNumber += 2;
 
@@ -610,12 +624,12 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
 
 function describeBonus(row: PaymentRequestRow): string {
   const { revenue, partnerType, commission, bonus } = row;
-  if (revenue > FLAT_RATE_THRESHOLD) {
+  if (revenue >= FLAT_RATE_THRESHOLD) {
     const total = Math.floor(revenue * FLAT_RATE);
     const salaryNote =
       FIXED_SALARY[partnerType] > 0 ? ` − lương cứng ${money(FIXED_SALARY[partnerType])}` : "";
     return (
-      `doanh số ${money(revenue)} vượt ${money(FLAT_RATE_THRESHOLD)} nên tổng thu nhập = ` +
+      `doanh số ${money(revenue)} đạt ${money(FLAT_RATE_THRESHOLD)} nên tổng thu nhập = ` +
       `${percent(FLAT_RATE)} × doanh số = ${money(total)}; thưởng = ${money(total)} − hoa hồng ` +
       `${money(commission)}${salaryNote} = ${money(bonus)}.`
     );

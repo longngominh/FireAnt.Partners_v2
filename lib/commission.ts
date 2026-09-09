@@ -4,10 +4,12 @@
  * Rules:
  *   - Incremental: từng phần doanh số tính theo band tương ứng.
  *   - Monthly reset: tích lũy reset về 0 đầu mỗi tháng.
- *   - sales_employee: có lương cứng công ty + hoa hồng + thưởng bán tốt.
- *   - collaborator: không có lương cứng, KHÔNG có thưởng riêng — từ 09/2026 mức
- *     thưởng đã gộp vào tỷ lệ bậc (bậc 130tr+ nhảy lên 19,5%…27%).
- *   - Cả hai loại: doanh số > 250tr thì tổng thu nhập tháng = 18% doanh số.
+ *   - Từ 09/2026 KHÔNG còn thưởng bán tốt riêng cho cả hai loại — mức thưởng cũ
+ *     đã gộp vào tỷ lệ bậc (NVKD: 90tr+ nhảy lên 16,5%…23%; CTV: 130tr+ lên 19,5%…27%).
+ *   - sales_employee: có lương cứng công ty (trả qua bảng lương) + hoa hồng theo bậc.
+ *   - collaborator: không có lương cứng, chỉ hoa hồng theo bậc.
+ *   - Cả hai loại: doanh số từ 250tr trở lên thì tổng thu nhập tháng = 18% doanh số
+ *     (NVKD: hoa hồng thực nhận = 18% doanh số − lương cứng 6tr).
  */
 
 export const PARTNER_TYPES = ["sales_employee", "collaborator"] as const;
@@ -34,19 +36,23 @@ export type RemunerationBreakdown = {
   effectiveRate: number;
 };
 
+// Bảng NVKD đã gộp thưởng bán tốt vào tỷ lệ: từ bậc 90tr mỗi bậc cộng thêm
+// 5%, 5%, 6%, 6%, 7%, 7%, 8%, 8% tương ứng mức thưởng cũ chia cho độ rộng bậc 20tr.
+// Bậc cuối để mở (Infinity) cho các phép tính lũy tiến theo đơn; riêng thu nhập
+// tháng khi doanh số >= FLAT_RATE_THRESHOLD được calcMonthlyRemuneration ghi đè = 18%.
 export const SALES_EMPLOYEE_COMMISSION_BANDS: readonly CommissionBand[] = [
   { from: 0,           to: 30_000_000,  rate: 0 },
   { from: 30_000_000,  to: 50_000_000,  rate: 0.10 },
   { from: 50_000_000,  to: 70_000_000,  rate: 0.105 },
   { from: 70_000_000,  to: 90_000_000,  rate: 0.11 },
-  { from: 90_000_000,  to: 110_000_000, rate: 0.115 },
-  { from: 110_000_000, to: 130_000_000, rate: 0.12 },
-  { from: 130_000_000, to: 150_000_000, rate: 0.125 },
-  { from: 150_000_000, to: 170_000_000, rate: 0.13 },
-  { from: 170_000_000, to: 190_000_000, rate: 0.135 },
-  { from: 190_000_000, to: 210_000_000, rate: 0.14 },
-  { from: 210_000_000, to: 230_000_000, rate: 0.145 },
-  { from: 230_000_000, to: Infinity,    rate: 0.15 },
+  { from: 90_000_000,  to: 110_000_000, rate: 0.165 },
+  { from: 110_000_000, to: 130_000_000, rate: 0.17 },
+  { from: 130_000_000, to: 150_000_000, rate: 0.185 },
+  { from: 150_000_000, to: 170_000_000, rate: 0.19 },
+  { from: 170_000_000, to: 190_000_000, rate: 0.205 },
+  { from: 190_000_000, to: 210_000_000, rate: 0.21 },
+  { from: 210_000_000, to: 230_000_000, rate: 0.225 },
+  { from: 230_000_000, to: Infinity,    rate: 0.23 },
 ] as const;
 
 // Bảng CTV đã gộp thưởng bán tốt vào tỷ lệ: từ bậc 130tr mỗi bậc cộng thêm
@@ -76,24 +82,17 @@ export const FIXED_SALARY: Record<PartnerType, number> = {
   collaborator: 0,
 };
 
-/** Doanh số vượt mốc này thì tổng thu nhập tháng cố định = 18% doanh số. */
+/** Doanh số từ mốc này trở lên thì tổng thu nhập tháng cố định = 18% doanh số. */
 export const FLAT_RATE_THRESHOLD = 250_000_000;
 export const FLAT_RATE = 0.18;
 
 export type PerformanceBonusTier = { revenue: number; bonus: number };
 
 export const PERFORMANCE_BONUSES: Record<PartnerType, PerformanceBonusTier[]> = {
-  sales_employee: [
-    { revenue: 110_000_000, bonus: 1_000_000 },
-    { revenue: 130_000_000, bonus: 2_000_000 },
-    { revenue: 150_000_000, bonus: 3_200_000 },
-    { revenue: 170_000_000, bonus: 4_400_000 },
-    { revenue: 190_000_000, bonus: 5_800_000 },
-    { revenue: 210_000_000, bonus: 7_200_000 },
-    { revenue: 230_000_000, bonus: 8_800_000 },
-    { revenue: 250_000_000, bonus: 10_400_000 },
-  ],
-  // CTV không có thưởng riêng — đã gộp vào COLLABORATOR_COMMISSION_BANDS.
+  // Từ 09/2026 không loại nào có thưởng riêng — đã gộp vào *_COMMISSION_BANDS.
+  // Giữ cấu trúc để performanceBonus trong RemunerationBreakdown vẫn = 0 thay vì
+  // phải sửa mọi nơi hiển thị, và để bật lại được nếu chính sách đổi.
+  sales_employee: [],
   collaborator: [],
 };
 
@@ -215,11 +214,12 @@ export function calcMonthlyRemuneration(
   const normalizedType = normalizePartnerType(partnerType);
   const revenue = Math.max(0, monthlyRevenue);
 
-  if (revenue > FLAT_RATE_THRESHOLD) {
+  // Quy chế ghi "từ 250.000.000 VNĐ trở lên" → so sánh >=.
+  if (revenue >= FLAT_RATE_THRESHOLD) {
     const total = Math.floor(revenue * FLAT_RATE);
     const baseSalary = FIXED_SALARY[normalizedType];
     // Có chế độ thưởng: hoa hồng vẫn theo bậc, phần còn lại của 18% là thưởng.
-    // Không có thưởng (CTV): toàn bộ 18% (trừ lương cứng, nếu có) là hoa hồng.
+    // Không có thưởng (hiện tại cả hai loại): 18% doanh số − lương cứng là hoa hồng.
     const commission = hasPerformanceBonus(normalizedType)
       ? calcCommissionFromTotal(revenue, normalizedType)
       : Math.max(0, total - baseSalary);
