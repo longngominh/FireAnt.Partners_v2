@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { PlusIcon, UserRoundXIcon } from "lucide-react";
+import { Suspense } from "react";
+import { PlusIcon } from "lucide-react";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { CouponTable } from "@/components/features/payment/coupon-table";
@@ -7,7 +8,7 @@ import { FilterBar } from "@/components/features/payment/filter-bar";
 import { Pagination } from "@/components/shared/pagination";
 import { listCoupons } from "@/lib/data/payment";
 import type { CouponStatus } from "@/lib/data/payment";
-import { countPaidOrdersWithoutAccount } from "@/lib/data/pending-accounts";
+import { PendingAccountBanner } from "@/components/features/payment/pending-account-banner";
 
 export const metadata = { title: "Link thanh toán đã tạo" };
 
@@ -29,10 +30,13 @@ export default async function PaymentListPage({
   const page = Number(params.page ?? "1") || 1;
   const status = (params.status ?? "ALL") as CouponStatus | "ALL";
   const partnerId = isAdmin ? null : session?.user.partnerId ?? null;
-  const [{ rows, total, pageSize }, pendingAccountCount] = await Promise.all([
-    listCoupons({ partnerId, status, q: params.q ?? "", page, pageSize: 20 }),
-    countPaidOrdersWithoutAccount(partnerId),
-  ]);
+  const { rows, total, pageSize } = await listCoupons({
+    partnerId,
+    status,
+    q: params.q ?? "",
+    page,
+    pageSize: 20,
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,18 +55,10 @@ export default async function PaymentListPage({
         </Button>
       </div>
 
-      {pendingAccountCount > 0 ? (
-        <Link
-          href="/payment/pending-account"
-          className="flex items-center gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm transition-colors hover:bg-warning/15"
-        >
-          <UserRoundXIcon className="size-4 shrink-0 text-warning" />
-          <span className="min-w-0">
-            <strong className="font-semibold">{pendingAccountCount} đơn đã thu tiền</strong> có email chưa được
-            đăng ký tài khoản FireAnt — khách chưa dùng được gói. Bấm để xem và nhắc khách đăng ký.
-          </span>
-        </Link>
-      ) : null}
+      {/* Đếm phải hỏi linked server NEWFA — để trong Suspense cho bảng hiện ra ngay. */}
+      <Suspense fallback={null}>
+        <PendingAccountBanner partnerId={partnerId} />
+      </Suspense>
 
       <FilterBar />
 

@@ -92,24 +92,21 @@ export async function listPaidOrdersWithoutAccount(
 
     const pool = await getPool();
 
+    // Một lần gọi cho cả trang lẫn tổng số: tập ứng viên (và lượt join sang linked server
+    // NEWFA) chỉ dựng một lần thay vì hai. Xem chú thích hiệu năng trong
+    // db/stored-procedures/usp_ListPaidOrdersWithoutAccount.sql.
     const dataRes = await pool
       .request()
       .input("PartnerId", sql.Int, validPartnerId)
       .input("Q", sql.NVarChar(200), qParam)
       .input("Offset", sql.Int, offset)
       .input("PageSize", sql.Int, pageSize)
+      .output("Total", sql.Int)
       .execute<PendingRow>("usp_ListPaidOrdersWithoutAccount");
-
-    type CountRow = { Total: number };
-    const countRes = await pool
-      .request()
-      .input("PartnerId", sql.Int, validPartnerId)
-      .input("Q", sql.NVarChar(200), qParam)
-      .execute<CountRow>("usp_CountPaidOrdersWithoutAccount");
 
     return {
       rows: dataRes.recordset.map(mapRow),
-      total: countRes.recordset[0]?.Total ?? 0,
+      total: (dataRes.output.Total as number | null) ?? 0,
       page,
       pageSize,
     };
@@ -119,10 +116,33 @@ export async function listPaidOrdersWithoutAccount(
   }
 }
 
-/** Số đơn đang chờ khách đăng ký tài khoản — dùng cho badge trên menu/trang danh sách. */
+/**
+ * Số đơn đang chờ khách đăng ký tài khoản — badge trên /payment.
+ * Gọi proc đếm riêng (không kèm danh sách) vì chỗ đó không cần dòng nào.
+ */
 export async function countPaidOrdersWithoutAccount(
   partnerId?: string | number | null,
 ): Promise<number> {
-  const { total } = await listPaidOrdersWithoutAccount({ partnerId, pageSize: 1 });
-  return total;
+  try {
+    const numPartnerId =
+      partnerId !== null && partnerId !== undefined
+        ? typeof partnerId === "string"
+          ? parseInt(partnerId, 10)
+          : partnerId
+        : null;
+
+    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
+
+    const pool = await getPool();
+    const res = await pool
+      .request()
+      .input("PartnerId", sql.Int, validPartnerId)
+      .input("Q", sql.NVarChar(200), null)
+      .execute<{ Total: number }>("usp_CountPaidOrdersWithoutAccount");
+
+    return res.recordset[0]?.Total ?? 0;
+  } catch (err) {
+    console.error("[countPaidOrdersWithoutAccount]", err);
+    return 0;
+  }
 }
