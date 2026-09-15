@@ -8,7 +8,7 @@ import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
-import { findFireAntUser } from "@/lib/data/identity";
+import { CustomerUserNameError, resolveCustomerUserName } from "@/lib/payment/customer";
 import { getUpgradeQuote, type UpgradeQuote } from "@/lib/data/membership";
 import {
   createPartnerPaymentOrder,
@@ -106,15 +106,24 @@ export async function createPaymentAction(
     const pkg = await getPackageInfo(parsed.data.packageId);
     const amount = Math.round(pkg.amount);
 
-    // Không bắt buộc tài khoản FireAnt tồn tại — khách có thể mua trước,
-    // tạo tài khoản sau. Nếu đã tồn tại thì dùng UserName chuẩn trong DB
-    // (đúng hoa/thường); nếu chưa thì giữ nguyên giá trị đối tác nhập.
-    let customerUserName = parsed.data.customerEmail.trim();
+    // Không bắt buộc tài khoản FireAnt tồn tại — khách có thể mua trước, tạo tài khoản sau.
+    // resolveCustomerUserName lo phần chuẩn hoá: có tài khoản thì lấy UserName chuẩn trong DB,
+    // chưa có thì bắt buộc là email và hạ về chữ thường (xem lib/payment/customer.ts).
+    let customerUserName: string;
+    let customerHasAccount: boolean;
     try {
-      const fireantUser = await findFireAntUser(customerUserName);
-      if (fireantUser) customerUserName = fireantUser.userName;
+      const resolvedCustomer = await resolveCustomerUserName(parsed.data.customerEmail);
+      customerUserName = resolvedCustomer.userName;
+      customerHasAccount = resolvedCustomer.hasAccount;
     } catch (err) {
-      console.warn("[createPaymentAction] tra cứu tài khoản FireAnt lỗi, bỏ qua", err);
+      if (err instanceof CustomerUserNameError) {
+        return {
+          ok: false,
+          error: err.message,
+          fieldErrors: { customerEmail: [err.message] },
+        };
+      }
+      throw err;
     }
 
     const code = generateShortCode(8);
@@ -172,6 +181,7 @@ export async function createPaymentAction(
         isMock: paymentOrder.isMock,
         orderAmount: amount,
         customerEmail: customerUserName,
+        customerHasAccount,
         note,
         serviceId: pkg.serviceId,
         packageLabel,
@@ -307,6 +317,8 @@ export async function createUpgradePaymentAction(
         isMock: paymentOrder.isMock,
         orderAmount: option.price,
         customerEmail: quote.userName,
+        // Nâng cấp chỉ áp dụng cho khách đang dùng gói -> luôn đã có tài khoản.
+        customerHasAccount: true,
         note,
         serviceId: tier.serviceId,
         packageLabel: `${tier.name} · ${durationLabel(option.months)}`,

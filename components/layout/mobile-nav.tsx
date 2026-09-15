@@ -10,6 +10,7 @@ import {
   LinkIcon,
   TicketIcon,
   UsersIcon,
+  UserRoundXIcon,
   ShieldIcon,
   WalletIcon,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const partnerNav: NavItem[] = [
   { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboardIcon, exact: true },
   { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
   { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
+  { href: "/payment/pending-account", label: "Đơn chờ tài khoản", icon: UserRoundXIcon },
   { href: "/customers", label: "Khách hàng", icon: UsersIcon },
 ];
 

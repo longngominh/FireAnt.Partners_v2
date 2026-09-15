@@ -143,6 +143,14 @@ export function PaymentResultDialog({
                     ) : null}
                   </dl>
 
+                  {!result.customerHasAccount ? (
+                    <Notice>
+                      <span className="font-semibold">Email này chưa có tài khoản FireAnt.</span> Đơn vẫn được duyệt
+                      tự động khi nhận tiền, nhưng khách phải đăng ký tài khoản bằng{" "}
+                      <span className="font-semibold">đúng email {result.customerEmail}</span> thì gói mới có hiệu lực.
+                      Nhớ nhắc khách — đơn sẽ nằm trong mục “Chờ tài khoản” cho tới khi khách đăng ký.
+                    </Notice>
+                  ) : null}
                   {result.qrPending ? (
                     <Notice>OnePay tạm chưa trả QR chuyển khoản. Khách vẫn có thể mở link — QR sẽ được tạo lại khi truy cập.</Notice>
                   ) : null}

@@ -5,6 +5,11 @@ import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { createPaymentSchema } from "@/lib/validations/payment";
 import { createPartnerPaymentOrder } from "@/lib/payment/order-payment";
+import {
+  CustomerUserNameError,
+  resolveCustomerUserName,
+  type ResolvedCustomer,
+} from "@/lib/payment/customer";
 
 export async function GET(request: NextRequest) {
   const session = await auth();
@@ -59,6 +64,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let customer: ResolvedCustomer;
+  try {
+    // Cùng quy tắc với /payment/create: có tài khoản thì lấy UserName chuẩn trong DB,
+    // chưa có thì bắt buộc email + hạ chữ thường (lib/payment/customer.ts).
+    customer = await resolveCustomerUserName(parsed.data.customerEmail);
+  } catch (err) {
+    if (err instanceof CustomerUserNameError) {
+      return NextResponse.json(
+        { error: err.message, fieldErrors: { customerEmail: [err.message] } },
+        { status: 422 },
+      );
+    }
+    throw err;
+  }
+
   try {
     const code = generateShortCode(8);
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -69,14 +89,12 @@ export async function POST(request: NextRequest) {
     paymentUrl.searchParams.set("packageId", String(parsed.data.packageId));
     paymentUrl.searchParams.set("paymentMethod", "1");
     paymentUrl.searchParams.set("couponCode", code);
-    if (parsed.data.customerEmail?.trim()) {
-      paymentUrl.searchParams.set("userName", parsed.data.customerEmail.trim());
-    }
+    paymentUrl.searchParams.set("userName", customer.userName);
     const paymentLink = paymentUrl.toString();
 
     const paymentOrder = await createPartnerPaymentOrder({
       packageId: parsed.data.packageId,
-      userName: parsed.data.customerEmail.trim(),
+      userName: customer.userName,
       amount: parsed.data.amount,
       couponCode: code,
       note: parsed.data.note?.trim() || null,
@@ -88,7 +106,7 @@ export async function POST(request: NextRequest) {
       code,
       paymentLink,
       packageId: parsed.data.packageId,
-      userName: parsed.data.customerEmail?.trim() || null,
+      userName: customer.userName,
       note: parsed.data.note?.trim() || null,
     });
 
@@ -103,7 +121,8 @@ export async function POST(request: NextRequest) {
       qrPending: paymentOrder.qrPending,
       isMock: paymentOrder.isMock,
       orderAmount: parsed.data.amount,
-      customerEmail: parsed.data.customerEmail?.trim() || null,
+      customerEmail: customer.userName,
+      customerHasAccount: customer.hasAccount,
       note: parsed.data.note?.trim() || null,
     });
   } catch (err) {

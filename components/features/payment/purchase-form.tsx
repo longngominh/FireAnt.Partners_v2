@@ -235,7 +235,8 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
                 <p className="text-xs text-destructive">{state.fieldErrors.customerEmail[0]}</p>
               ) : (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Khách chưa có tài khoản vẫn tạo được link — đăng ký bằng đúng username/email này để được kích hoạt.
+                  Khách chưa có tài khoản vẫn tạo được link — khi đó phải nhập <strong>email</strong> khách sẽ dùng
+                  để đăng ký, vì gói chỉ kích hoạt cho đúng email đó.
                 </p>
               )}
             </div>

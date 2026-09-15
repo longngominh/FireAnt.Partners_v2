@@ -16,6 +16,8 @@ export type CreatePaymentResult = {
   isMock: boolean;
   orderAmount: number;
   customerEmail: string | null;
+  /** Email/username khách đã có tài khoản FireAnt chưa (chưa có thì phải nhắc khách đăng ký) */
+  customerHasAccount: boolean;
   note: string | null;
   /** Hạng dịch vụ của gói (33/34/35/39) */
   serviceId: number | null;
