@@ -58,20 +58,17 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
 
     const pool = await getPool();
 
+    // Một lần gọi cho cả trang lẫn tổng số: tập ứng viên (và lượt join sang linked server
+    // NEWFA) chỉ dựng một lần. Xem chú thích hiệu năng trong
+    // db/stored-procedures/usp_ListCustomers.sql.
     const dataRes = await pool
       .request()
       .input("PartnerId", sql.Int,          validPartnerId)
       .input("Q",         sql.NVarChar(200), qParam)
       .input("Offset",    sql.Int,           offset)
       .input("PageSize",  sql.Int,           pageSize)
+      .output("Total",    sql.Int)
       .execute<CustomerRow>("usp_ListCustomers");
-
-    type CountRow = { Total: number };
-    const countRes = await pool
-      .request()
-      .input("PartnerId", sql.Int,          validPartnerId)
-      .input("Q",         sql.NVarChar(200), qParam)
-      .execute<CountRow>("usp_CountCustomers");
 
     const rows: Customer[] = dataRes.recordset.map((r) => ({
       username: r.UserName,
@@ -89,7 +86,7 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
 
     return {
       rows,
-      total: countRes.recordset[0]?.Total ?? 0,
+      total: (dataRes.output.Total as number | null) ?? 0,
       page,
       pageSize,
     };
