@@ -7,17 +7,18 @@ CREATE OR ALTER PROCEDURE usp_CreateCoupon
   @Note           NVARCHAR(MAX) = NULL,
   @Source         NVARCHAR(50) = NULL,     -- nguồn khách (Zalo, TikTok, Team 1…)
   @VoucherCode    NVARCHAR(20) = NULL,     -- mã khuyến mại đã áp vào đơn của link
-  @DiscountAmount DECIMAL(18, 2) = NULL    -- số tiền đã giảm (0 với voucher tặng ngày)
+  @DiscountAmount DECIMAL(18, 2) = NULL,   -- số tiền đã giảm (0 với voucher tặng ngày)
+  @CustomerPhone  NVARCHAR(20) = NULL      -- số di động CTV nhập cho khách (0xxxxxxxxx)
 AS
 BEGIN
   SET NOCOUNT ON;
 
   INSERT INTO Coupons
     (PartnerId, CouponTypeId, CouponCode, IsUsed, CreatedDate, ExpireDate, PaymentLink, PackageId, UserName, Note,
-     Source, VoucherCode, DiscountAmount)
+     Source, VoucherCode, DiscountAmount, CustomerPhone)
   VALUES
     (@PartnerId, 1, @CouponCode, 0, GETDATE(), DATEADD(day, 14, GETDATE()), @PaymentLink, @PackageId, @UserName, @Note,
-     @Source, @VoucherCode, @DiscountAmount);
+     @Source, @VoucherCode, @DiscountAmount, @CustomerPhone);
 
   SELECT SCOPE_IDENTITY() AS CouponID;
 END;

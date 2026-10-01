@@ -84,6 +84,7 @@ BEGIN
     cp.PartnerId,
     cp.Note,
     cp.CreatedDate,
+    cp.CustomerPhone,
     i.Name  AS PartnerName,
     i.Email AS PartnerEmail
   FROM  #page pg

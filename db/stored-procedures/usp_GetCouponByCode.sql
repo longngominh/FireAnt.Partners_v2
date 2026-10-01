@@ -41,7 +41,8 @@ BEGIN
     cp.Note,
     cp.Source,
     cp.VoucherCode,
-    cp.DiscountAmount
+    cp.DiscountAmount,
+    cp.CustomerPhone
   FROM  Coupons cp
   LEFT  JOIN vw_PaidOrders o ON o.OrderID = @OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(

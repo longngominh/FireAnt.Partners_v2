@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PHONE_INVALID_MESSAGE, PHONE_REQUIRED_MESSAGE, normalizeVnPhone } from "@/lib/payment/phone";
 import { SOURCE_MAX_LENGTH, normalizeSource } from "@/lib/payment/source";
 import { VOUCHER_CODE_RE, normalizeVoucherCode } from "@/lib/payment/voucher-link";
 
@@ -23,10 +24,49 @@ export const voucherCodeSchema = z
   .refine((v) => v === "" || VOUCHER_CODE_RE.test(v), "Mã khuyến mại gồm 4–20 chữ cái hoặc chữ số")
   .transform((v) => (v === "" ? null : v));
 
+/**
+ * Số di động của khách (tuỳ chọn ở tầng parse) — chuẩn hoá về 0xxxxxxxxx, null khi bỏ trống.
+ * Có bắt buộc hay không do action quyết định (tài khoản đã có số thì không cần nhập).
+ */
+export const phoneSchema = z.string().transform((value, ctx) => {
+  if (!value.trim()) return null;
+  const phone = normalizeVnPhone(value);
+  if (!phone) {
+    ctx.addIssue({ code: "custom", message: PHONE_INVALID_MESSAGE });
+    return z.NEVER;
+  }
+  return phone;
+});
+
 /** Field bổ sung của form /payment/create (không có trong POST /api/coupons). */
 export const createPaymentExtrasSchema = z.object({
   voucherCode: voucherCodeSchema,
   source: sourceSchema,
+  customerPhone: phoneSchema,
+});
+
+/** Form "Tạo tài khoản cho khách". */
+export const createCustomerAccountSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(1, "Vui lòng nhập email của khách")
+    .max(256, "Email tối đa 256 ký tự")
+    .regex(/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, "Email không hợp lệ"),
+  name: z.string().trim().max(100, "Họ tên tối đa 100 ký tự"),
+  phone: z.string().transform((value, ctx) => {
+    if (!value.trim()) {
+      ctx.addIssue({ code: "custom", message: PHONE_REQUIRED_MESSAGE });
+      return z.NEVER;
+    }
+    const phone = normalizeVnPhone(value);
+    if (!phone) {
+      ctx.addIssue({ code: "custom", message: PHONE_INVALID_MESSAGE });
+      return z.NEVER;
+    }
+    return phone;
+  }),
 });
 
 export const createPaymentSchema = z.object({

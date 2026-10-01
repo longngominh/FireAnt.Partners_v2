@@ -111,6 +111,7 @@ BEGIN
       OR ISNULL(cp.UserName,'') LIKE @Q
       OR ISNULL(cp.Source, '') LIKE @Q
       OR ISNULL(cp.VoucherCode, '') LIKE @Q
+      OR ISNULL(cp.CustomerPhone, '') LIKE @Q
       OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
     );
 END;
@@ -248,17 +249,18 @@ CREATE OR ALTER PROCEDURE usp_CreateCoupon
   @Note           NVARCHAR(MAX) = NULL,
   @Source         NVARCHAR(50) = NULL,     -- nguồn khách (Zalo, TikTok, Team 1…)
   @VoucherCode    NVARCHAR(20) = NULL,     -- mã khuyến mại đã áp vào đơn của link
-  @DiscountAmount DECIMAL(18, 2) = NULL    -- số tiền đã giảm (0 với voucher tặng ngày)
+  @DiscountAmount DECIMAL(18, 2) = NULL,   -- số tiền đã giảm (0 với voucher tặng ngày)
+  @CustomerPhone  NVARCHAR(20) = NULL      -- số di động CTV nhập cho khách (0xxxxxxxxx)
 AS
 BEGIN
   SET NOCOUNT ON;
 
   INSERT INTO Coupons
     (PartnerId, CouponTypeId, CouponCode, IsUsed, CreatedDate, ExpireDate, PaymentLink, PackageId, UserName, Note,
-     Source, VoucherCode, DiscountAmount)
+     Source, VoucherCode, DiscountAmount, CustomerPhone)
   VALUES
     (@PartnerId, 1, @CouponCode, 0, GETDATE(), DATEADD(day, 14, GETDATE()), @PaymentLink, @PackageId, @UserName, @Note,
-     @Source, @VoucherCode, @DiscountAmount);
+     @Source, @VoucherCode, @DiscountAmount, @CustomerPhone);
 
   SELECT SCOPE_IDENTITY() AS CouponID;
 END;
@@ -311,7 +313,8 @@ BEGIN
     cp.Note,
     cp.Source,
     cp.VoucherCode,
-    cp.DiscountAmount
+    cp.DiscountAmount,
+    cp.CustomerPhone
   FROM  Coupons cp
   LEFT  JOIN vw_PaidOrders o ON o.OrderID = @OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
@@ -744,7 +747,8 @@ BEGIN
       cp.Note,
       cp.Source,
       cp.VoucherCode,
-      cp.DiscountAmount
+      cp.DiscountAmount,
+      cp.CustomerPhone
     FROM Coupons cp
     WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
       AND (
@@ -769,6 +773,7 @@ BEGIN
         OR ISNULL(cp.UserName, '') LIKE @Q
         OR ISNULL(cp.Source, '') LIKE @Q
         OR ISNULL(cp.VoucherCode, '') LIKE @Q
+        OR ISNULL(cp.CustomerPhone, '') LIKE @Q
         OR cp.PaymentLink LIKE @Q
         OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
       )
@@ -804,7 +809,8 @@ BEGIN
     cp.Note,
     cp.Source,
     cp.VoucherCode,
-    cp.DiscountAmount
+    cp.DiscountAmount,
+    cp.CustomerPhone
   FROM  PagedCoupons cp
   LEFT  JOIN PaidByCoupon pbc ON pbc.CouponCode = cp.CouponCode
   LEFT  JOIN vw_PaidOrders o  ON o.OrderID      = pbc.OrderID
@@ -1148,6 +1154,7 @@ BEGIN
     cp.PartnerId,
     cp.Note,
     cp.CreatedDate,
+    cp.CustomerPhone,
     i.Name  AS PartnerName,
     i.Email AS PartnerEmail
   FROM  #page pg

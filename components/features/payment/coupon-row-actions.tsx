@@ -218,6 +218,7 @@ export function CouponRowActions({
               />
             ) : null}
             {coupon.source ? <Stat label="Nguồn" value={coupon.source} mono={false} /> : null}
+            {coupon.customerPhone ? <Stat label="SĐT khách" value={coupon.customerPhone} /> : null}
             {paymentQr?.accountNumber ? (
               <Stat label="Tài khoản nhận" value={paymentQr.accountNumber} />
             ) : null}

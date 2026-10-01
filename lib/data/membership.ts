@@ -1,6 +1,7 @@
 import { getPool, sql } from "@/lib/db/sql";
 import { findFireAntUser } from "@/lib/data/identity";
 import { listPackages, type ServicePackage } from "@/lib/data/packages";
+import { maskPhone } from "@/lib/payment/phone";
 import {
   MEMBERSHIP_PREMIUM,
   MEMBERSHIP_PRO,
@@ -64,6 +65,10 @@ export type UpgradeQuote =
   | {
       eligible: true;
       userName: string;
+      /** Tài khoản đã có số điện thoại chưa — chưa có thì CTV phải nhập khi tạo link */
+      hasPhone: boolean;
+      /** Số của tài khoản, đã che (chỉ 3 số cuối) */
+      maskedPhone: string | null;
       current: UpgradeCurrent;
       amountLeft: number;
       tiers: UpgradeTier[];
@@ -290,6 +295,8 @@ export async function getUpgradeQuote(
   return {
     eligible: true,
     userName,
+    hasPhone: !!user.phoneNumber,
+    maskedPhone: maskPhone(user.phoneNumber),
     current: {
       serviceId: sub.ServiceID,
       name: tierName(sub.ServiceID),

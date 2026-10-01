@@ -41,7 +41,8 @@ BEGIN
       cp.Note,
       cp.Source,
       cp.VoucherCode,
-      cp.DiscountAmount
+      cp.DiscountAmount,
+      cp.CustomerPhone
     FROM Coupons cp
     WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
       AND (
@@ -66,6 +67,7 @@ BEGIN
         OR ISNULL(cp.UserName, '') LIKE @Q
         OR ISNULL(cp.Source, '') LIKE @Q
         OR ISNULL(cp.VoucherCode, '') LIKE @Q
+        OR ISNULL(cp.CustomerPhone, '') LIKE @Q
         OR cp.PaymentLink LIKE @Q
         OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
       )
@@ -101,7 +103,8 @@ BEGIN
     cp.Note,
     cp.Source,
     cp.VoucherCode,
-    cp.DiscountAmount
+    cp.DiscountAmount,
+    cp.CustomerPhone
   FROM  PagedCoupons cp
   LEFT  JOIN PaidByCoupon pbc ON pbc.CouponCode = cp.CouponCode
   LEFT  JOIN vw_PaidOrders o  ON o.OrderID      = pbc.OrderID

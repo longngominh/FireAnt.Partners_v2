@@ -26,6 +26,8 @@ export type Coupon = {
   voucherCode: string | null;
   /** Khoản giảm của mã lúc tạo link (0 với mã tặng ngày) */
   discountAmount: number | null;
+  /** Số điện thoại CTV nhập cho khách khi tạo link */
+  customerPhone: string | null;
 };
 
 export type CouponListFilter = {
@@ -63,6 +65,7 @@ type CouponRow = {
   Source: string | null;
   VoucherCode: string | null;
   DiscountAmount: number | null;
+  CustomerPhone: string | null;
 };
 
 /**
@@ -103,6 +106,7 @@ function mapCoupon(r: CouponRow): Coupon {
     source: r.Source ?? null,
     voucherCode: r.VoucherCode ?? null,
     discountAmount: r.DiscountAmount ?? null,
+    customerPhone: r.CustomerPhone ?? null,
   };
 }
 
@@ -189,6 +193,7 @@ export type CreateCouponInput = {
   source?: string | null;
   voucherCode?: string | null;
   discountAmount?: number | null;
+  customerPhone?: string | null;
 };
 
 export async function createCoupon(input: CreateCouponInput): Promise<{ id: number; code: string }> {
@@ -216,6 +221,7 @@ export async function createCoupon(input: CreateCouponInput): Promise<{ id: numb
     req.input("VoucherCode", sql.NVarChar(20), input.voucherCode);
     req.input("DiscountAmount", sql.Decimal(18, 2), input.discountAmount ?? 0);
   }
+  if (input.customerPhone) req.input("CustomerPhone", sql.NVarChar(20), input.customerPhone);
 
   const res = await req.execute<InsertRow>("usp_CreateCoupon");
 

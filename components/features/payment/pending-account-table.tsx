@@ -12,6 +12,7 @@ import {
 import { formatVND } from "@/lib/utils/currency";
 import type { PendingAccountOrder } from "@/lib/data/pending-accounts";
 import { CopyEmailButton } from "./copy-email-button";
+import { CreateAccountButton } from "./create-account-button";
 
 export function PendingAccountTable({
   rows,
@@ -44,6 +45,7 @@ export function PendingAccountTable({
               <TableHead className="hidden md:table-cell">Ngày thu</TableHead>
               {showPartner ? <TableHead className="hidden lg:table-cell">Đối tác</TableHead> : null}
               <TableHead className="hidden lg:table-cell">Ghi chú</TableHead>
+              <TableHead className="text-right">Thao tác</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -73,6 +75,9 @@ export function PendingAccountTable({
                 ) : null}
                 <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
                   {row.note ?? "—"}
+                </TableCell>
+                <TableCell className="text-right">
+                  <CreateAccountButton email={row.userName} phone={row.customerPhone} />
                 </TableCell>
               </TableRow>
             ))}

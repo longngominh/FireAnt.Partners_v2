@@ -23,6 +23,8 @@ export type PendingAccountOrder = {
   partnerName: string | null;
   partnerEmail: string | null;
   note: string | null;
+  /** Số CTV nhập lúc tạo link — điền sẵn khi tạo tài khoản hộ khách */
+  customerPhone: string | null;
 };
 
 export type PendingAccountFilter = {
@@ -52,6 +54,7 @@ type PendingRow = {
   PartnerId: number;
   Note: string | null;
   CreatedDate: Date;
+  CustomerPhone?: string | null;
   PartnerName: string | null;
   PartnerEmail: string | null;
 };
@@ -70,6 +73,7 @@ function mapRow(r: PendingRow): PendingAccountOrder {
     partnerName: r.PartnerName ?? null,
     partnerEmail: r.PartnerEmail ?? null,
     note: r.Note ?? null,
+    customerPhone: r.CustomerPhone ?? null,
   };
 }
 

@@ -131,6 +131,11 @@ export function PaymentResultDialog({
                         </span>
                       </Row>
                     ) : null}
+                    {result.customerPhone ? (
+                      <Row label="Số điện thoại">
+                        <span className="num font-medium">{result.customerPhone}</span>
+                      </Row>
+                    ) : null}
                     {result.source ? (
                       <Row label="Nguồn">
                         <span className="font-medium">{result.source}</span>
@@ -174,9 +179,11 @@ export function PaymentResultDialog({
                       <span className="font-semibold">Email này chưa có tài khoản FireAnt.</span> Đơn vẫn được duyệt
                       tự động khi nhận tiền, nhưng khách phải đăng ký tài khoản bằng{" "}
                       <span className="font-semibold">đúng email {result.customerEmail}</span> thì gói mới có hiệu lực.
-                      Nhớ nhắc khách — đơn sẽ nằm trong mục “Chờ tài khoản” cho tới khi khách đăng ký.
+                      Nhắc khách đăng ký, hoặc tạo tài khoản hộ khách: nút “Tạo tài khoản cho khách” ở bước 2, hay ở
+                      mục “Chờ tài khoản” sau khi khách thanh toán.
                     </Notice>
                   ) : null}
+                  {result.phoneNotice ? <Notice>{result.phoneNotice}</Notice> : null}
                   {result.qrPending ? (
                     <Notice>OnePay tạm chưa trả QR chuyển khoản. Khách vẫn có thể mở link — QR sẽ được tạo lại khi truy cập.</Notice>
                   ) : null}

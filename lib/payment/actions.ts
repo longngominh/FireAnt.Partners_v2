@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import type { Session } from "next-auth";
 import {
+  createCustomerAccountSchema,
   createPaymentExtrasSchema,
   createPaymentSchema,
   createUpgradePaymentSchema,
+  phoneSchema,
   sourceSchema,
   voucherCodeSchema,
 } from "@/lib/validations/payment";
@@ -14,7 +16,15 @@ import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
-import { CustomerUserNameError, resolveCustomerUserName } from "@/lib/payment/customer";
+import { findFireAntUser, setFireAntUserPhoneIfEmpty } from "@/lib/data/identity";
+import {
+  countAccountsCreatedBy,
+  logCustomerAccountAction,
+  type CustomerAccountAction,
+} from "@/lib/data/customer-account-log";
+import { CustomerUserNameError, isEmailLike, resolveCustomerUserName } from "@/lib/payment/customer";
+import { registerFireAntAccount, sendPasswordSetupEmail } from "@/lib/payment/fireant-account";
+import { PHONE_REQUIRED_MESSAGE, maskPhone } from "@/lib/payment/phone";
 import { getUpgradeQuote, type UpgradeQuote } from "@/lib/data/membership";
 import {
   VOUCHER_FULL_DISCOUNT_MESSAGE,
@@ -29,11 +39,23 @@ import { buildVoucherPaymentLink, normalizeVoucherCode } from "@/lib/payment/vou
 import { previewVoucher } from "@/lib/payment/voucher";
 import { durationLabel, tierName } from "@/lib/payment/tiers";
 
-import type { AppliedVoucher, CreatePaymentState, VoucherPreview } from "@/lib/payment/types";
+import type {
+  AppliedVoucher,
+  CreateCustomerAccountResult,
+  CreatePaymentState,
+  CustomerLookup,
+  VoucherPreview,
+} from "@/lib/payment/types";
 
 /** service_ApplyVoucher bắt buộc AspNetUsers.Id — khách chỉ có email thì chưa dùng mã được. */
 const VOUCHER_NEEDS_ACCOUNT =
-  "Mã khuyến mại chỉ dùng được khi khách đã có tài khoản FireAnt. Nhờ khách đăng ký trước, hoặc bỏ mã để tạo link giá gốc.";
+  "Mã khuyến mại chỉ dùng được khi khách đã có tài khoản FireAnt. Bấm “Tạo tài khoản cho khách”, hoặc bỏ mã để tạo link giá gốc.";
+
+/** Số tài khoản một CTV được tạo hộ khách trong 24 giờ (admin không giới hạn). */
+const ACCOUNT_CREATE_LIMIT_PER_DAY = 20;
+
+const PHONE_NOT_SAVED_NOTICE =
+  "Chưa lưu được số điện thoại vào tài khoản FireAnt của khách (số vẫn lưu trên link). Báo admin cập nhật giúp để khách nhận được tin ZNS.";
 
 
 function appBaseUrl(): string {
@@ -42,6 +64,52 @@ function appBaseUrl(): string {
 
 function staffOf(session: Session): string {
   return session.user.email?.trim() || session.user.id || "partner";
+}
+
+/** Ghi CustomerAccountLog; lỗi ghi nhật ký không làm hỏng thao tác chính. */
+async function logAccountAction(
+  session: Session,
+  action: CustomerAccountAction,
+  userName: string,
+  phoneNumber: string | null,
+  succeeded: boolean,
+  note: string | null = null,
+): Promise<void> {
+  try {
+    await logCustomerAccountAction({
+      action,
+      partnerId: session.user.partnerId,
+      createdBy: staffOf(session),
+      userName,
+      phoneNumber,
+      succeeded,
+      note,
+    });
+  } catch (err) {
+    console.error("[CustomerAccountLog]", err);
+  }
+}
+
+/**
+ * Điền số điện thoại cho tài khoản FireAnt chưa có số (không ghi đè số đã có) — xem
+ * setFireAntUserPhoneIfEmpty. Trả về false khi chưa ghi được (thiếu quyền linked server…).
+ */
+async function fillAccountPhone(
+  session: Session,
+  user: { id: string; userName: string },
+  phone: string,
+): Promise<boolean> {
+  let saved = false;
+  let note: string | null = null;
+  try {
+    saved = await setFireAntUserPhoneIfEmpty(user.id, phone);
+    if (!saved) note = "Tài khoản đã có số hoặc không tìm thấy";
+  } catch (err) {
+    console.error(`[fillAccountPhone] ${user.userName}`, err);
+    note = err instanceof Error ? err.message : String(err);
+  }
+  await logAccountAction(session, "FILL_PHONE", user.userName, phone, saved, note);
+  return saved;
 }
 
 /**
@@ -106,6 +174,7 @@ export async function createPaymentAction(
   const extras = createPaymentExtrasSchema.safeParse({
     voucherCode: formData.get("voucherCode") ?? "",
     source: formData.get("source") ?? "",
+    customerPhone: formData.get("customerPhone") ?? "",
   });
 
   if (!parsed.success || !extras.success) {
@@ -135,11 +204,13 @@ export async function createPaymentAction(
     let customerUserName: string;
     let customerHasAccount: boolean;
     let customerUserId: string | null;
+    let accountHasPhone: boolean;
     try {
       const resolvedCustomer = await resolveCustomerUserName(parsed.data.customerEmail);
       customerUserName = resolvedCustomer.userName;
       customerHasAccount = resolvedCustomer.hasAccount;
       customerUserId = resolvedCustomer.userId;
+      accountHasPhone = !!resolvedCustomer.phoneNumber;
     } catch (err) {
       if (err instanceof CustomerUserNameError) {
         return {
@@ -149,6 +220,13 @@ export async function createPaymentAction(
         };
       }
       throw err;
+    }
+
+    // Mua gói hội viên hay khóa học đều bắt buộc số điện thoại (như checkout Corporate). Tài
+    // khoản đã có số thì dùng số đó; chưa có (hoặc chưa có tài khoản) thì CTV phải nhập.
+    const customerPhone = accountHasPhone ? null : extras.data.customerPhone;
+    if (!accountHasPhone && !customerPhone) {
+      return { ok: false, error: PHONE_REQUIRED_MESSAGE, fieldErrors: { customerPhone: [PHONE_REQUIRED_MESSAGE] } };
     }
 
     // Mã khuyến mại: kiểm tra lại trên server (không tin kết quả "Áp dụng" ở client) TRƯỚC
@@ -220,11 +298,21 @@ export async function createPaymentAction(
         source,
         voucherCode: voucher?.code ?? null,
         discountAmount: paymentOrder.voucher?.discountAmount ?? null,
+        customerPhone,
       });
     } catch (err) {
       // Đơn đã giữ một lượt của mã mà không có coupon thì không ai gửi được link — trả lượt lại.
       if (voucher) await cancelPartnerOrderQuietly(paymentOrder.orderId, `Khong tao duoc coupon ${code}`);
       throw err;
+    }
+
+    // Tài khoản chưa có số: ghi số CTV nhập vào tài khoản để ZNS sau thanh toán và hệ thống
+    // khóa học có số liên hệ. Khách chưa có tài khoản thì số nằm trên link, điền vào tài
+    // khoản khi CTV bấm "Tạo tài khoản cho khách".
+    let phoneNotice: string | null = null;
+    if (customerUserId && customerPhone) {
+      const saved = await fillAccountPhone(session, { id: customerUserId, userName: customerUserName }, customerPhone);
+      if (!saved) phoneNotice = PHONE_NOT_SAVED_NOTICE;
     }
 
     revalidateAfterCreate();
@@ -270,6 +358,8 @@ export async function createPaymentAction(
         listAmount: amount,
         voucher: appliedVoucher,
         source,
+        customerPhone,
+        phoneNotice,
       },
     };
   } catch (err) {
@@ -351,6 +441,155 @@ export async function previewVoucherAction(input: {
   }
 }
 
+/**
+ * Tra tài khoản cho ô "Tài khoản FireAnt" ở /payment/create (gọi khi CTV ngừng gõ): đã có tài
+ * khoản chưa, tài khoản có số điện thoại chưa. Số của tài khoản chỉ trả bản che 3 số cuối.
+ */
+export async function lookupCustomerAction(rawInput: string): Promise<CustomerLookup> {
+  const input = String(rawInput ?? "").trim();
+  const session = await auth();
+  if (!session?.user) {
+    return { status: "invalid", input, error: "Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang." };
+  }
+  if (!input) return { status: "invalid", input, error: "Vui lòng nhập tài khoản FireAnt" };
+  if (input.length > 256) return { status: "invalid", input, error: "Tài khoản FireAnt tối đa 256 ký tự" };
+
+  try {
+    const user = await findFireAntUser(input);
+    if (user) {
+      return {
+        status: "account",
+        input,
+        userName: user.userName,
+        hasPhone: !!user.phoneNumber,
+        maskedPhone: maskPhone(user.phoneNumber),
+      };
+    }
+    if (isEmailLike(input)) return { status: "new-email", input, email: input.toLowerCase() };
+    return {
+      status: "invalid",
+      input,
+      error: "Chưa có tài khoản FireAnt nào khớp. Nếu khách chưa có tài khoản, hãy nhập email khách sẽ dùng.",
+    };
+  } catch (err) {
+    console.error("[lookupCustomerAction]", err);
+    return { status: "invalid", input, error: "Chưa tra được tài khoản, vui lòng thử lại." };
+  }
+}
+
+/**
+ * Tạo tài khoản FireAnt HỘ khách (email + số điện thoại bắt buộc) qua API đăng ký của FireAnt,
+ * ghi số vào tài khoản rồi gửi email để khách tự đặt mật khẩu — xem lib/payment/fireant-account.ts.
+ * Mỗi lần tạo đều ghi CustomerAccountLog; CTV tối đa ACCOUNT_CREATE_LIMIT_PER_DAY tài khoản/24 giờ.
+ */
+export async function createCustomerAccountAction(input: {
+  email: string;
+  name: string;
+  phone: string;
+}): Promise<CreateCustomerAccountResult> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang." };
+
+  const parsed = createCustomerAccountSchema.safeParse({
+    email: String(input?.email ?? ""),
+    name: String(input?.name ?? ""),
+    phone: String(input?.phone ?? ""),
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path[0];
+    return {
+      ok: false,
+      error: issue?.message ?? "Dữ liệu không hợp lệ.",
+      field: field === "email" || field === "name" || field === "phone" ? field : undefined,
+    };
+  }
+  const { email, name, phone } = parsed.data;
+
+  try {
+    // Tạo tài khoản là thao tác ghi vào hệ thống tài khoản FireAnt: chỉ admin hoặc đối tác
+    // đang hoạt động (phiên của đối tác đã bị khoá vẫn còn hạn thì không được tạo).
+    if (session.user.role !== "admin") {
+      const partner = session.user.partnerId ? await getPartner(session.user.partnerId) : null;
+      if (!partner?.isActive) {
+        return { ok: false, error: "Tài khoản đối tác không hoạt động — không thể tạo tài khoản cho khách." };
+      }
+    }
+
+    const existing = await findFireAntUser(email);
+    if (existing) {
+      return {
+        ok: false,
+        error: "Email này đã có tài khoản FireAnt — dùng luôn tài khoản đó để tạo link.",
+        field: "email",
+        existingUserName: existing.userName,
+      };
+    }
+
+    // Nhật ký là điều kiện bắt buộc: không đọc/ghi được bảng thì không tạo, để lần tạo nào
+    // cũng truy được người tạo.
+    let createdRecently: number;
+    try {
+      createdRecently = await countAccountsCreatedBy(staffOf(session));
+    } catch (err) {
+      console.error("[createCustomerAccountAction] CustomerAccountLog", err);
+      return {
+        ok: false,
+        error: "Tính năng tạo tài khoản chưa sẵn sàng (thiếu bảng nhật ký). Vui lòng liên hệ admin.",
+      };
+    }
+    if (session.user.role !== "admin" && createdRecently >= ACCOUNT_CREATE_LIMIT_PER_DAY) {
+      return {
+        ok: false,
+        error: `Bạn đã tạo ${createdRecently} tài khoản trong 24 giờ qua (giới hạn ${ACCOUNT_CREATE_LIMIT_PER_DAY}). Vui lòng liên hệ FireAnt nếu cần tạo thêm.`,
+      };
+    }
+
+    const registered = await registerFireAntAccount({ email, name: name || null });
+    if (!registered.ok) {
+      await logAccountAction(session, "CREATE_ACCOUNT", email, phone, false, registered.message);
+      return { ok: false, error: registered.message, field: "email" };
+    }
+
+    const user = await findFireAntUser(email);
+    if (!user) {
+      await logAccountAction(session, "CREATE_ACCOUNT", email, phone, false, "Đăng ký báo thành công nhưng chưa đọc lại được tài khoản");
+      return { ok: false, error: "Đã gửi đăng ký nhưng chưa thấy tài khoản mới. Vui lòng thử lại sau ít phút." };
+    }
+
+    let phoneSaved = false;
+    try {
+      phoneSaved = await setFireAntUserPhoneIfEmpty(user.id, phone);
+    } catch (err) {
+      console.error(`[createCustomerAccountAction] ghi số cho ${user.userName}`, err);
+    }
+
+    let setupEmailSent = false;
+    try {
+      setupEmailSent = await sendPasswordSetupEmail(email);
+    } catch (err) {
+      console.error(`[createCustomerAccountAction] gửi email đặt mật khẩu cho ${user.userName}`, err);
+    }
+
+    await logAccountAction(
+      session,
+      "CREATE_ACCOUNT",
+      user.userName,
+      phone,
+      true,
+      `phoneSaved=${phoneSaved}; setupEmailSent=${setupEmailSent}`,
+    );
+    // Đơn đã thu tiền của email này rời danh sách "Chờ tài khoản" ngay.
+    revalidatePath("/payment/pending-account");
+    revalidatePath("/payment");
+
+    return { ok: true, userName: user.userName, phoneSaved, maskedPhone: maskPhone(phone), setupEmailSent };
+  } catch (err) {
+    console.error("[createCustomerAccountAction]", err);
+    return { ok: false, error: "Chưa tạo được tài khoản, vui lòng thử lại." };
+  }
+}
+
 /** Tra cứu điều kiện + báo giá nâng cấp cho một tài khoản FireAnt. */
 export async function getUpgradeQuoteAction(customerEmail: string): Promise<UpgradeQuote> {
   const session = await auth();
@@ -386,14 +625,16 @@ export async function createUpgradePaymentAction(
   // Nâng cấp không nhận mã khuyến mại: service_ProcessUpgradeOrder chỉ làm việc với
   // UpgradeAmount và số tiền đó còn quy đổi thành ngày sử dụng — chỉ gắn nguồn khách.
   const parsedSource = sourceSchema.safeParse(formData.get("source") ?? "");
+  const parsedPhone = phoneSchema.safeParse(formData.get("customerPhone") ?? "");
 
-  if (!parsed.success || !parsedSource.success) {
+  if (!parsed.success || !parsedSource.success || !parsedPhone.success) {
     return {
       ok: false,
       error: "Dữ liệu không hợp lệ.",
       fieldErrors: {
         ...(parsed.success ? {} : parsed.error.flatten().fieldErrors),
         ...(parsedSource.success ? {} : { source: parsedSource.error.issues.map((i) => i.message) }),
+        ...(parsedPhone.success ? {} : { customerPhone: parsedPhone.error.issues.map((i) => i.message) }),
       },
     };
   }
@@ -408,6 +649,12 @@ export async function createUpgradePaymentAction(
     const quote = await getUpgradeQuote(parsed.data.customerEmail);
     if (!quote.eligible) {
       return { ok: false, error: `${quote.title}. ${quote.detail}` };
+    }
+
+    // Gói hội viên bắt buộc số điện thoại: tài khoản chưa có số thì CTV phải nhập.
+    const customerPhone = quote.hasPhone ? null : parsedPhone.data;
+    if (!quote.hasPhone && !customerPhone) {
+      return { ok: false, error: PHONE_REQUIRED_MESSAGE, fieldErrors: { customerPhone: [PHONE_REQUIRED_MESSAGE] } };
     }
 
     const tier = quote.tiers.find((t) => t.serviceId === parsed.data.tierServiceId);
@@ -460,7 +707,15 @@ export async function createUpgradePaymentAction(
       userName: quote.userName,
       note,
       source,
+      customerPhone,
     });
+
+    let phoneNotice: string | null = null;
+    if (customerPhone) {
+      const user = await findFireAntUser(quote.userName);
+      const saved = user ? await fillAccountPhone(session, user, customerPhone) : false;
+      if (!saved) phoneNotice = PHONE_NOT_SAVED_NOTICE;
+    }
 
     revalidateAfterCreate();
 
@@ -491,6 +746,8 @@ export async function createUpgradePaymentAction(
         listAmount: null,
         voucher: null,
         source,
+        customerPhone,
+        phoneNotice,
       },
     };
   } catch (err) {

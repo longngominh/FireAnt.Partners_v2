@@ -36,6 +36,40 @@ export type VoucherPreview =
       field: "voucherCode" | "customerEmail";
     };
 
+/**
+ * Tra tài khoản khách khi CTV nhập ở /payment/create. Số điện thoại của tài khoản không bao
+ * giờ ra client nguyên vẹn — chỉ có cờ + bản che 3 số cuối.
+ */
+export type CustomerLookup =
+  | {
+      status: "account";
+      /** Chuỗi CTV đã nhập (để biết kết quả còn khớp ô nhập không) */
+      input: string;
+      userName: string;
+      hasPhone: boolean;
+      maskedPhone: string | null;
+    }
+  | { status: "new-email"; input: string; email: string }
+  | { status: "invalid"; input: string; error: string };
+
+export type CreateCustomerAccountResult =
+  | {
+      ok: true;
+      userName: string;
+      /** Đã ghi được số vào tài khoản chưa (thiếu quyền ghi qua linked server thì false) */
+      phoneSaved: boolean;
+      maskedPhone: string | null;
+      /** Đã gửi email để khách tự đặt mật khẩu chưa */
+      setupEmailSent: boolean;
+    }
+  | {
+      ok: false;
+      error: string;
+      field?: "email" | "name" | "phone";
+      /** Email đã có tài khoản — form chuyển sang dùng tài khoản này */
+      existingUserName?: string;
+    };
+
 export type CreatePaymentResult = {
   kind: PaymentResultKind;
   code: string;
@@ -69,6 +103,10 @@ export type CreatePaymentResult = {
   voucher: AppliedVoucher | null;
   /** Nguồn khách CTV gắn cho link */
   source: string | null;
+  /** Số điện thoại CTV nhập cho khách (null = dùng số có sẵn trong tài khoản) */
+  customerPhone: string | null;
+  /** Cảnh báo khi chưa lưu được số vào tài khoản FireAnt */
+  phoneNotice: string | null;
 };
 
 export type CreatePaymentState = {

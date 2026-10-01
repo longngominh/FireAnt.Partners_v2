@@ -14,6 +14,7 @@ import {
   type CreatePaymentState,
   type VoucherPreview,
 } from "@/lib/payment/types";
+import { normalizeVnPhone } from "@/lib/payment/phone";
 import { normalizeSource } from "@/lib/payment/source";
 import { durationLabel, tierMeta } from "@/lib/payment/tiers";
 import type { ServicePackage } from "@/lib/data/packages";
@@ -27,7 +28,10 @@ import {
   TierBadge,
   perMonth,
 } from "./form-bits";
+import { CreateAccountDialog, type CreatedAccount } from "./create-account-dialog";
+import { CustomerLookupStatus, CustomerPhoneField } from "./customer-fields";
 import { SourceField } from "./source-field";
+import { useCustomerLookup } from "./use-customer-lookup";
 import { VoucherField, isCurrentPreview } from "./voucher-field";
 
 type Props = {
@@ -72,8 +76,12 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(services[0]?.serviceId ?? null);
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
   const [customer, setCustomer] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [note, setNote] = useState("");
   const [source, setSource] = useState("");
+  const { lookup, checking, refresh: refreshLookup, setLookup } = useCustomerLookup(customer);
+  // Đổi key mỗi lần mở để dialog lấy lại email/số mới nhất làm giá trị mặc định.
+  const [accountDialog, setAccountDialog] = useState<{ open: boolean; key: number }>({ open: false, key: 0 });
   const [voucherCode, setVoucherCode] = useState("");
   const [voucherPreview, setVoucherPreview] = useState<VoucherPreview | null>(null);
   // Kết quả "Áp dụng" lúc bấm tạo link — server bác mã (vừa hết lượt, hết hạn…) thì lỗi chỉ
@@ -133,7 +141,49 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
     }
   }, [state, onCreated]);
 
-  const canSubmit = !!selectedPackage && customer.trim().length > 0 && !voucherUnchecked && !pending;
+  // Số điện thoại bắt buộc (gói hội viên & khóa học): tài khoản đã có số thì dùng số đó.
+  const accountHasPhone = lookup?.status === "account" && lookup.hasPhone;
+  const phoneReady = accountHasPhone || !!normalizeVnPhone(customerPhone);
+  const customerReady = lookup?.status === "account" || lookup?.status === "new-email";
+
+  const canSubmit =
+    !!selectedPackage && customerReady && phoneReady && !voucherUnchecked && !pending;
+
+  // Lý do nút tạo link còn khoá (theo thứ tự CTV điền form).
+  const submitHint = !customer.trim()
+    ? "Nhập tài khoản khách ở bước 2 để tạo link."
+    : checking
+      ? null
+      : !customerReady
+        ? "Kiểm tra lại tài khoản khách ở bước 2."
+        : !phoneReady
+          ? "Nhập số điện thoại của khách ở bước 2."
+          : voucherUnchecked
+            ? "Áp dụng hoặc bỏ mã khuyến mại để tạo link."
+            : null;
+
+  function openAccountDialog() {
+    setAccountDialog((d) => ({ open: true, key: d.key + 1 }));
+  }
+
+  function handleAccountCreated(account: CreatedAccount, phone: string) {
+    // Ô tài khoản chuyển sang tài khoản vừa tạo, không phải chờ tra lại. Số vừa nhập điền
+    // sẵn ở bước 2 — dùng tới khi chưa ghi được số vào tài khoản.
+    setCustomer(account.userName);
+    setCustomerPhone(phone);
+    setLookup({
+      status: "account",
+      input: account.userName,
+      userName: account.userName,
+      hasPhone: account.phoneSaved,
+      maskedPhone: account.phoneSaved ? account.maskedPhone : null,
+    });
+  }
+
+  function handleExistingAccount(userName: string) {
+    setCustomer(userName);
+    refreshLookup();
+  }
 
   return (
     <form
@@ -257,9 +307,9 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
         <StepCard
           step={2}
           title="Thông tin khách hàng"
-          description="Link gắn với tài khoản FireAnt của khách để kích hoạt đúng người."
+          description="Link gắn với tài khoản FireAnt của khách để kích hoạt đúng người. Gói hội viên và khóa học đều cần số điện thoại."
         >
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
             <div className="flex flex-col gap-2">
               <Label htmlFor="customerEmail">
                 Tài khoản FireAnt <span className="text-destructive">*</span>
@@ -274,20 +324,27 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
                   placeholder="username hoặc email đăng nhập"
                   value={customer}
                   onChange={(e) => setCustomer(e.target.value)}
-                  aria-invalid={!!state.fieldErrors?.customerEmail}
+                  aria-invalid={!!state.fieldErrors?.customerEmail || lookup?.status === "invalid"}
                   className="h-9 pl-9"
                   required
                 />
               </div>
-              {state.fieldErrors?.customerEmail ? (
-                <p className="text-xs text-destructive">{state.fieldErrors.customerEmail[0]}</p>
-              ) : (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Khách chưa có tài khoản vẫn tạo được link — khi đó phải nhập <strong>email</strong> khách sẽ dùng
-                  để đăng ký, vì gói chỉ kích hoạt cho đúng email đó.
-                </p>
-              )}
+              <CustomerLookupStatus
+                lookup={lookup}
+                checking={checking}
+                serverError={state.fieldErrors?.customerEmail?.[0]}
+                onCreateAccount={openAccountDialog}
+                onRetry={refreshLookup}
+              />
             </div>
+
+            <CustomerPhoneField
+              id="customerPhone"
+              lookup={lookup}
+              value={customerPhone}
+              onChange={setCustomerPhone}
+              serverError={state.fieldErrors?.customerPhone?.[0]}
+            />
 
             <SourceField
               id="source"
@@ -297,7 +354,7 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
               error={state.fieldErrors?.source?.[0]}
             />
 
-            <div className="flex flex-col gap-2 sm:col-span-2">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="note">
                 Ghi chú <span className="text-xs font-normal text-muted-foreground">(tuỳ chọn)</span>
               </Label>
@@ -351,7 +408,14 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
             </div>
             <div className="flex flex-col gap-2">
               <SummaryRow label="Khách hàng" muted={!customer.trim()}>
-                <span className="block max-w-[180px] truncate">{customer.trim() || "Chưa nhập"}</span>
+                <span className="block max-w-[180px] truncate">
+                  {lookup?.status === "account" ? lookup.userName : customer.trim() || "Chưa nhập"}
+                </span>
+              </SummaryRow>
+              <SummaryRow label="Số điện thoại" muted={!phoneReady}>
+                <span className="num block max-w-[180px] truncate">
+                  {accountHasPhone ? lookup.maskedPhone : normalizeVnPhone(customerPhone) ?? "Chưa nhập"}
+                </span>
               </SummaryRow>
               {sourceLabel ? (
                 <SummaryRow label="Nguồn">
@@ -396,12 +460,20 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
           <LinkIcon className="size-4" />
           {pending ? "Đang tạo link…" : "Tạo link & mã QR"}
         </Button>
-        {voucherUnchecked && selectedPackage && !pending ? (
-          <p className="-mt-2 text-center text-xs text-muted-foreground">
-            Áp dụng hoặc bỏ mã khuyến mại để tạo link.
-          </p>
+        {submitHint && selectedPackage && !pending ? (
+          <p className="-mt-2 text-center text-xs text-muted-foreground">{submitHint}</p>
         ) : null}
       </SummaryCard>
+
+      <CreateAccountDialog
+        key={accountDialog.key}
+        open={accountDialog.open}
+        onOpenChange={(open) => setAccountDialog((d) => ({ ...d, open }))}
+        defaultEmail={lookup?.status === "new-email" ? lookup.email : customer.trim()}
+        defaultPhone={customerPhone}
+        onCreated={handleAccountCreated}
+        onExisting={handleExistingAccount}
+      />
     </form>
   );
 }

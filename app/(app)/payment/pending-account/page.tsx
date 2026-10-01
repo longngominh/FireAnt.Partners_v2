@@ -37,9 +37,9 @@ export default async function PendingAccountPage({
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">Đơn chờ tài khoản</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Khách đã thanh toán nhưng email trên đơn chưa có tài khoản FireAnt. Gói chỉ có hiệu lực khi khách
-            đăng ký bằng <strong>đúng email đó</strong> — hãy nhắc khách đăng ký. Đơn tự rời khỏi danh sách
-            ngay khi tài khoản được tạo.
+            Khách đã thanh toán nhưng email trên đơn chưa có tài khoản FireAnt. Gói chỉ có hiệu lực khi có tài
+            khoản đúng email đó — nhắc khách đăng ký, hoặc bấm <strong>Tạo tài khoản</strong> để tạo hộ khách
+            (FireAnt gửi email để khách tự đặt mật khẩu). Đơn tự rời khỏi danh sách ngay khi tài khoản được tạo.
           </p>
         </div>
         <Button asChild variant="outline" className="gap-2">

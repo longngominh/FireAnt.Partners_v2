@@ -3,6 +3,10 @@ import { findFireAntUser } from "@/lib/data/identity";
 /** Đủ chặt để loại các chuỗi rõ ràng không phải email, không cố bắt mọi RFC. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+export function isEmailLike(value: string): boolean {
+  return EMAIL_RE.test(value.trim());
+}
+
 export class CustomerUserNameError extends Error {}
 
 export type ResolvedCustomer = {
@@ -12,6 +16,8 @@ export type ResolvedCustomer = {
   hasAccount: boolean;
   /** AspNetUsers.Id khi đã có tài khoản — mã khuyến mại bắt buộc có (service_ApplyVoucher) */
   userId: string | null;
+  /** Số điện thoại đang lưu trong tài khoản (null = chưa có / chưa có tài khoản) */
+  phoneNumber: string | null;
 };
 
 /**
@@ -31,7 +37,7 @@ export async function resolveCustomerUserName(input: string): Promise<ResolvedCu
 
   const existing = await findFireAntUser(value);
   if (existing) {
-    return { userName: existing.userName, hasAccount: true, userId: existing.id };
+    return { userName: existing.userName, hasAccount: true, userId: existing.id, phoneNumber: existing.phoneNumber };
   }
 
   if (!EMAIL_RE.test(value)) {
@@ -40,5 +46,5 @@ export async function resolveCustomerUserName(input: string): Promise<ResolvedCu
     );
   }
 
-  return { userName: value.toLowerCase(), hasAccount: false, userId: null };
+  return { userName: value.toLowerCase(), hasAccount: false, userId: null, phoneNumber: null };
 }

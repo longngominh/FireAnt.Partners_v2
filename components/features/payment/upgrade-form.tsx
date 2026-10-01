@@ -14,6 +14,7 @@ import { createPaymentInitialState, type CreatePaymentResult, type CreatePayment
 import { durationLabel, tierMeta } from "@/lib/payment/tiers";
 import type { UpgradeOption, UpgradeQuote, UpgradeTier } from "@/lib/data/membership";
 import { cn } from "@/lib/utils";
+import { normalizeVnPhone } from "@/lib/payment/phone";
 import { normalizeSource } from "@/lib/payment/source";
 import {
   Callout,
@@ -25,6 +26,7 @@ import {
   SummaryRow,
   TierBadge,
 } from "./form-bits";
+import { CustomerPhoneField } from "./customer-fields";
 import { SourceField } from "./source-field";
 
 type Props = {
@@ -61,9 +63,13 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
   const [optionKey, setOptionKey] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [source, setSource] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const sourceLabel = normalizeSource(source);
 
   const eligible = quote?.eligible ? quote : null;
+  // Gói hội viên bắt buộc số điện thoại: tài khoản chưa có số thì CTV nhập để lưu vào tài khoản.
+  const needsPhone = !!eligible && !eligible.hasPhone;
+  const phoneReady = !needsPhone || !!normalizeVnPhone(customerPhone);
   const tier = eligible?.tiers.find((t) => t.serviceId === tierId) ?? eligible?.tiers[0] ?? null;
   const option: UpgradeOption | null = tier?.options.find((o) => o.key === optionKey && o.available) ?? null;
 
@@ -73,6 +79,8 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
       toast.error("Nhập tài khoản FireAnt của khách trước.");
       return;
     }
+    // Số đã nhập thuộc về khách trước — đổi khách thì nhập lại.
+    if (value !== checkedAccount) setCustomerPhone("");
     startChecking(async () => {
       const q = await getUpgradeQuoteAction(value);
       setQuote(q);
@@ -105,6 +113,7 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
       setTierId(null);
       setOptionKey(null);
       setNote("");
+      setCustomerPhone("");
     } else if (state.error && state.error !== lastSeenErrorRef.current) {
       lastSeenErrorRef.current = state.error;
       toast.error(state.error);
@@ -112,7 +121,8 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
   }, [state, onCreated]);
 
   const accountChanged = account.trim() !== checkedAccount;
-  const canSubmit = !!eligible && !!tier && !!option && !pending && !checking && !accountChanged;
+  const canSubmit =
+    !!eligible && !!tier && !!option && phoneReady && !pending && !checking && !accountChanged;
 
   return (
     <form action={action} className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
@@ -301,6 +311,19 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
             ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+              <CustomerPhoneField
+                id="upgradePhone"
+                lookup={{
+                  status: "account",
+                  input: eligible.userName,
+                  userName: eligible.userName,
+                  hasPhone: eligible.hasPhone,
+                  maskedPhone: eligible.maskedPhone,
+                }}
+                value={customerPhone}
+                onChange={setCustomerPhone}
+                serverError={state.fieldErrors?.customerPhone?.[0]}
+              />
               <SourceField
                 id="upgradeSource"
                 value={source}
@@ -308,7 +331,7 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
                 suggestions={sourceSuggestions}
                 error={state.fieldErrors?.source?.[0]}
               />
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 sm:col-span-2">
                 <Label htmlFor="upgradeNote">
                   Ghi chú <span className="text-xs font-normal text-muted-foreground">(tuỳ chọn, nội bộ)</span>
                 </Label>
@@ -356,6 +379,11 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
               <SummaryRow label="Khách hàng">
                 <span className="block max-w-[180px] truncate">{eligible.userName}</span>
               </SummaryRow>
+              <SummaryRow label="Số điện thoại" muted={!phoneReady}>
+                <span className="num">
+                  {eligible.hasPhone ? eligible.maskedPhone : normalizeVnPhone(customerPhone) ?? "Chưa nhập"}
+                </span>
+              </SummaryRow>
               {sourceLabel ? (
                 <SummaryRow label="Nguồn">
                   <span className="block max-w-[180px] truncate">{sourceLabel}</span>
@@ -371,6 +399,10 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
             {accountChanged ? (
               <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
                 Tài khoản đã thay đổi — bấm <strong className="font-semibold">Kiểm tra</strong> lại trước khi tạo link.
+              </p>
+            ) : !phoneReady ? (
+              <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+                Tài khoản chưa có số điện thoại — nhập số của khách ở bước 2 để tạo link.
               </p>
             ) : null}
           </>

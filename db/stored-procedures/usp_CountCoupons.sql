@@ -45,6 +45,7 @@ BEGIN
       OR ISNULL(cp.UserName,'') LIKE @Q
       OR ISNULL(cp.Source, '') LIKE @Q
       OR ISNULL(cp.VoucherCode, '') LIKE @Q
+      OR ISNULL(cp.CustomerPhone, '') LIKE @Q
       OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
     );
 END;
