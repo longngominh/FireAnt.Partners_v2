@@ -12,13 +12,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CustomerSearch } from "@/components/features/customers/customer-search";
+import { SourceFilter } from "@/components/features/payment/source-filter";
 import { Pagination } from "@/components/shared/pagination";
 import { listCustomers } from "@/lib/data/customers";
+import { listCouponSources } from "@/lib/data/payment";
 import { formatVND, formatNumber } from "@/lib/utils/currency";
 
 export const metadata = { title: "Khách hàng" };
 
-type SearchParams = Promise<{ q?: string; page?: string }>;
+type SearchParams = Promise<{ q?: string; source?: string; page?: string }>;
 
 export default async function CustomersPage({
   searchParams,
@@ -30,12 +32,17 @@ export default async function CustomersPage({
   const isAdmin = session?.user.role === "admin";
 
   const page = Number(params.page ?? "1") || 1;
-  const { rows, total, pageSize } = await listCustomers({
-    partnerId: isAdmin ? null : session?.user.partnerId ?? null,
-    q: params.q ?? "",
-    page,
-    pageSize: 20,
-  });
+  const partnerId = isAdmin ? null : session?.user.partnerId ?? null;
+  const [{ rows, total, pageSize }, sources] = await Promise.all([
+    listCustomers({
+      partnerId,
+      q: params.q ?? "",
+      source: params.source ?? null,
+      page,
+      pageSize: 20,
+    }),
+    isAdmin || partnerId ? listCouponSources(partnerId) : Promise.resolve([]),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,13 +53,18 @@ export default async function CustomersPage({
         </p>
       </div>
 
-      <CustomerSearch />
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <div className="flex-1">
+          <CustomerSearch />
+        </div>
+        <SourceFilter sources={sources} />
+      </div>
 
       {rows.length === 0 ? (
         <Card className="flex flex-col items-center justify-center gap-2 border-dashed py-16 text-center">
           <p className="text-sm font-medium">Không tìm thấy khách hàng</p>
           <p className="text-xs text-muted-foreground">
-            Thử điều chỉnh từ khoá tìm kiếm.
+            Thử điều chỉnh từ khoá tìm kiếm hoặc bộ lọc nguồn.
           </p>
         </Card>
       ) : (
@@ -62,6 +74,7 @@ export default async function CustomersPage({
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead>Khách hàng</TableHead>
                 {isAdmin ? <TableHead>Đối tác</TableHead> : null}
+                <TableHead>Nguồn</TableHead>
                 <TableHead className="text-right">Đơn hàng</TableHead>
                 <TableHead className="text-right">Tổng chi tiêu</TableHead>
                 <TableHead className="hidden md:table-cell">Lần mua gần nhất</TableHead>
@@ -89,6 +102,15 @@ export default async function CustomersPage({
                       {c.partnerName ?? "—"}
                     </TableCell>
                   ) : null}
+                  <TableCell>
+                    {c.source ? (
+                      <span className="inline-block max-w-[140px] truncate rounded-full border px-2 py-0.5 align-middle text-[11px] font-medium">
+                        {c.source}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="num text-right text-sm">
                     {formatNumber(c.orderCount)}
                   </TableCell>
@@ -113,7 +135,7 @@ export default async function CustomersPage({
         pageSize={pageSize}
         total={total}
         basePath="/customers"
-        searchParams={{ q: params.q }}
+        searchParams={{ q: params.q, source: params.source }}
       />
     </div>
   );

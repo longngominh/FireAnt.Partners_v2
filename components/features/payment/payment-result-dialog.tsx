@@ -26,6 +26,7 @@ export function PaymentResultDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const isUpgrade = result?.kind === "upgrade";
+  const voucher = result?.voucher ?? null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -42,7 +43,9 @@ export function PaymentResultDialog({
               <DialogDescription>
                 {isUpgrade
                   ? "Gửi link hoặc QR cho khách. Khách chuyển đúng số tiền — gói được nâng cấp tự động ngay khi nhận tiền."
-                  : "Chia sẻ QR chuyển khoản hoặc link thanh toán cho khách hàng."}
+                  : voucher
+                    ? "Gửi link hoặc QR cho khách. Khách chuyển đúng số tiền đã trừ mã khuyến mại — gói kích hoạt tự động ngay khi nhận tiền."
+                    : "Chia sẻ QR chuyển khoản hoặc link thanh toán cho khách hàng."}
               </DialogDescription>
             </DialogHeader>
 
@@ -80,11 +83,16 @@ export function PaymentResultDialog({
                   <div className="flex flex-wrap items-end justify-between gap-2 rounded-xl border bg-muted/30 px-4 py-3">
                     <div className="flex flex-col">
                       <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        {isUpgrade ? "Khách cần chuyển" : "Giá gói"}
+                        {isUpgrade || voucher ? "Khách cần chuyển" : "Giá gói"}
                       </span>
                       <span className="num text-2xl font-bold tracking-tight text-primary">
                         {formatVND(result.orderAmount)}
                       </span>
+                      {voucher && voucher.discountAmount > 0 && result.listAmount ? (
+                        <span className="num text-xs text-muted-foreground">
+                          Giá gói <span className="line-through">{formatVND(result.listAmount)}</span>
+                        </span>
+                      ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-1 text-right">
                       <div className="flex items-center gap-1.5">
@@ -110,6 +118,24 @@ export function PaymentResultDialog({
                     <Row label="Tài khoản FireAnt">
                       <span className="truncate font-medium">{result.customerEmail ?? "—"}</span>
                     </Row>
+                    {voucher ? (
+                      <Row label="Mã khuyến mại">
+                        <span className="flex flex-col items-end">
+                          <span>
+                            <code className="font-mono font-semibold">{voucher.code}</code>
+                            <span className="text-muted-foreground"> · {voucher.title}</span>
+                          </span>
+                          <span className="num font-medium text-success">
+                            {voucher.discountAmount > 0 ? `−${formatVND(voucher.discountAmount)}` : voucher.benefit}
+                          </span>
+                        </span>
+                      </Row>
+                    ) : null}
+                    {result.source ? (
+                      <Row label="Nguồn">
+                        <span className="font-medium">{result.source}</span>
+                      </Row>
+                    ) : null}
                     {result.accountNumber ? (
                       <Row label="Tài khoản nhận">
                         <span className="flex items-center justify-end gap-1">

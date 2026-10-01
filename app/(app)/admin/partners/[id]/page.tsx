@@ -13,12 +13,13 @@ import { FilterBar } from "@/components/features/payment/filter-bar";
 import { Pagination } from "@/components/shared/pagination";
 import { getPartnerPerformance } from "@/lib/data/partners";
 import { isTrendRange } from "@/lib/data/trend";
-import { listCoupons, type CouponStatus } from "@/lib/data/payment";
+import { listCoupons, listCouponSources, type CouponStatus } from "@/lib/data/payment";
 import { formatNumber, formatVND } from "@/lib/utils/currency";
 
 type SearchParams = Promise<{
   q?: string;
   status?: string;
+  source?: string;
   page?: string;
   range?: string;
 }>;
@@ -52,17 +53,24 @@ export default async function PartnerDetailPage({
   const { partner } = data;
   const page = Number(query.page ?? "1") || 1;
   const status = (query.status ?? "ALL") as CouponStatus | "ALL";
-  const {
-    rows: couponRows,
-    total: couponTotal,
-    pageSize,
-  } = await listCoupons({
-    partnerId: id,
-    status,
-    q: query.q ?? "",
-    page,
-    pageSize: 10,
-  });
+  const [
+    {
+      rows: couponRows,
+      total: couponTotal,
+      pageSize,
+    },
+    sources,
+  ] = await Promise.all([
+    listCoupons({
+      partnerId: id,
+      status,
+      q: query.q ?? "",
+      source: query.source ?? null,
+      page,
+      pageSize: 10,
+    }),
+    listCouponSources(id),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -147,7 +155,7 @@ export default async function PartnerDetailPage({
           monthlyTrend: data.monthlyTrend,
         }}
         basePath={`/admin/partners/${partner.id}`}
-        searchParams={{ q: query.q, status: query.status }}
+        searchParams={{ q: query.q, status: query.status, source: query.source }}
       />
 
       <div className="flex flex-col gap-3">
@@ -157,14 +165,19 @@ export default async function PartnerDetailPage({
             Tổng {formatNumber(couponTotal)} link. Bấm vào từng hàng để xem QR và copy link nhanh.
           </p>
         </div>
-        <FilterBar />
+        <FilterBar sources={sources} />
         <CouponTable rows={couponRows} />
         <Pagination
           page={page}
           pageSize={pageSize}
           total={couponTotal}
           basePath={`/admin/partners/${partner.id}`}
-          searchParams={{ q: query.q, status: query.status, range: range === "1M" ? undefined : range }}
+          searchParams={{
+            q: query.q,
+            status: query.status,
+            source: query.source,
+            range: range === "1M" ? undefined : range,
+          }}
         />
       </div>
     </div>

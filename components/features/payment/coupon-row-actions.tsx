@@ -15,6 +15,7 @@ import {
 import { formatVND } from "@/lib/utils/currency";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
+import { isHostedPaymentLink } from "@/lib/payment/voucher-link";
 import { StatusBadge } from "./status-badge";
 import type { Coupon } from "@/lib/data/payment";
 
@@ -40,10 +41,14 @@ export function CouponRowActions({
   const [paymentQr, setPaymentQr] = useState<PaymentQrResult | null>(null);
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const isUpgrade = isUpgradePaymentLink(paymentLink);
+  const isHosted = isHostedPaymentLink(paymentLink);
 
-  /** Coupon nâng cấp: gửi khách link rút gọn /p/{code} (trang QR công khai), không gửi link kèm tham số nội bộ. */
+  /**
+   * Coupon nâng cấp / có mã khuyến mại: gửi khách link rút gọn /p/{code} (trang QR công khai),
+   * không gửi link kèm tham số nội bộ.
+   */
   function shareLink(): string {
-    if (!isUpgrade) return paymentLink;
+    if (!isHosted) return paymentLink;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     return `${origin}/p/${coupon.code}`;
   }
@@ -201,6 +206,18 @@ export function CouponRowActions({
               value={coupon.orderAmount > 0 ? formatVND(coupon.orderAmount) : "—"}
               accent="info"
             />
+            {coupon.voucherCode ? (
+              <Stat
+                label="Mã khuyến mại"
+                value={
+                  coupon.discountAmount
+                    ? `${coupon.voucherCode} · −${formatVND(coupon.discountAmount)}`
+                    : coupon.voucherCode
+                }
+                accent="success"
+              />
+            ) : null}
+            {coupon.source ? <Stat label="Nguồn" value={coupon.source} mono={false} /> : null}
             {paymentQr?.accountNumber ? (
               <Stat label="Tài khoản nhận" value={paymentQr.accountNumber} />
             ) : null}

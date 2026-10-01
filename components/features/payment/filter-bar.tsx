@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SourceFilter } from "./source-filter";
 
 const STATUS_OPTIONS = [
   { value: "ALL",     label: "Tất cả trạng thái" },
@@ -20,7 +21,8 @@ const STATUS_OPTIONS = [
   { value: "USED",    label: "Đã sử dụng" },
 ];
 
-export function FilterBar() {
+/** sources: các nguồn khách đã gắn cho link (bỏ trống thì không hiện ô lọc nguồn). */
+export function FilterBar({ sources = [] }: { sources?: string[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -79,12 +81,13 @@ export function FilterBar() {
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           key={q}
-          placeholder="Tìm theo mã, tên hoặc email khách hàng…"
+          placeholder="Tìm theo mã, mã khuyến mại, tên hoặc email khách hàng…"
           defaultValue={q}
           onChange={(e) => updateSearch(e.target.value)}
           className="pl-9"
         />
       </div>
+      <SourceFilter sources={sources} />
       <Select value={status} onValueChange={(v) => update({ status: v })}>
         <SelectTrigger className="w-full md:w-48">
           <SelectValue />

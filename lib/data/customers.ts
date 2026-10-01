@@ -1,4 +1,5 @@
 import { getPool, sql } from "@/lib/db/sql";
+import { sourceFilterParam } from "@/lib/data/payment";
 
 export type Customer = {
   username: string;
@@ -12,11 +13,15 @@ export type Customer = {
   memberEndDate: Date | null;
   latestPackage: string | null;
   partnerName: string | null;
+  /** Nguồn gắn trên link của đơn sớm nhất có gắn nguồn — kênh đưa khách về */
+  source: string | null;
 };
 
 export type CustomerListFilter = {
   partnerId?: string | number | null;
   q?: string;
+  /** Tên nguồn, hoặc SOURCE_NONE = khách chưa gắn nguồn; bỏ trống = mọi nguồn */
+  source?: string | null;
   page?: number;
   pageSize?: number;
 };
@@ -40,10 +45,11 @@ type CustomerRow = {
   MemberEndDate: Date | null;
   LatestPackage: string | null;
   PartnerName: string | null;
+  Source: string | null;
 };
 
 export async function listCustomers(filter: CustomerListFilter = {}): Promise<CustomerListResult> {
-  const { partnerId = null, q = "", page = 1, pageSize = 20 } = filter;
+  const { partnerId = null, q = "", source = null, page = 1, pageSize = 20 } = filter;
   try {
     const numPartnerId =
       partnerId !== null && partnerId !== undefined
@@ -61,14 +67,19 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
     // Một lần gọi cho cả trang lẫn tổng số: tập ứng viên (và lượt join sang linked server
     // NEWFA) chỉ dựng một lần. Xem chú thích hiệu năng trong
     // db/stored-procedures/usp_ListCustomers.sql.
-    const dataRes = await pool
+    const req = pool
       .request()
       .input("PartnerId", sql.Int,          validPartnerId)
       .input("Q",         sql.NVarChar(200), qParam)
       .input("Offset",    sql.Int,           offset)
       .input("PageSize",  sql.Int,           pageSize)
-      .output("Total",    sql.Int)
-      .execute<CustomerRow>("usp_ListCustomers");
+      .output("Total",    sql.Int);
+
+    // Chỉ gửi @Source khi đang lọc — proc bản trước vẫn chạy được (xem listCoupons).
+    const sourceParam = sourceFilterParam(source);
+    if (sourceParam !== null) req.input("Source", sql.NVarChar(50), sourceParam);
+
+    const dataRes = await req.execute<CustomerRow>("usp_ListCustomers");
 
     const rows: Customer[] = dataRes.recordset.map((r) => ({
       username: r.UserName,
@@ -82,6 +93,7 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
       memberEndDate: r.MemberEndDate ?? null,
       latestPackage: r.LatestPackage ?? null,
       partnerName: r.PartnerName ?? null,
+      source: r.Source ?? null,
     }));
 
     return {

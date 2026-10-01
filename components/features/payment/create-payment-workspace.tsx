@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ArrowUpCircleIcon, EyeIcon, ShoppingBagIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import type { ServicePackage } from "@/lib/data/packages";
 import type { CreatePaymentResult } from "@/lib/payment/types";
+import { mergeSourceSuggestions } from "@/lib/payment/source";
 import { PurchaseForm } from "./purchase-form";
 import { UpgradeForm } from "./upgrade-form";
 import { PaymentResultDialog } from "./payment-result-dialog";
@@ -31,6 +32,8 @@ type Props = {
   /** partnerId của phiên đăng nhập (admin kiêm đối tác) */
   sessionPartnerId: string | null;
   defaultMode?: CreateMode;
+  /** Chip chọn nhanh ở ô "Nguồn khách" (kênh có sẵn + nguồn đã dùng) */
+  sourceSuggestions: string[];
 };
 
 export function CreatePaymentWorkspace({
@@ -39,6 +42,7 @@ export function CreatePaymentWorkspace({
   partners,
   sessionPartnerId,
   defaultMode = "purchase",
+  sourceSuggestions,
 }: Props) {
   const [mode, setMode] = useState<CreateMode>(defaultMode);
   const [partnerId, setPartnerId] = useState<string>(
@@ -46,10 +50,20 @@ export function CreatePaymentWorkspace({
   );
   const [result, setResult] = useState<CreatePaymentResult | null>(null);
   const [open, setOpen] = useState(false);
+  // Nguồn vừa dùng trong phiên này — hiện ngay thành chip mà không cần tải lại trang.
+  const [recentSources, setRecentSources] = useState<string[]>([]);
+  const suggestions = useMemo(
+    () => mergeSourceSuggestions(recentSources, sourceSuggestions),
+    [recentSources, sourceSuggestions],
+  );
 
   const handleCreated = useCallback((r: CreatePaymentResult) => {
     setResult(r);
     setOpen(true);
+    if (r.source) {
+      const used = r.source;
+      setRecentSources((prev) => [used, ...prev.filter((s) => s.toLowerCase() !== used.toLowerCase())]);
+    }
     toast.success(r.kind === "upgrade" ? "Tạo link nâng cấp thành công" : "Tạo link thành công", {
       description: `Mã: ${r.code}`,
     });
@@ -104,12 +118,18 @@ export function CreatePaymentWorkspace({
       </div>
 
       {mode === "purchase" ? (
-        <PurchaseForm packages={packages} partnerId={effectivePartnerId} onCreated={handleCreated} />
+        <PurchaseForm
+          packages={packages}
+          partnerId={effectivePartnerId}
+          onCreated={handleCreated}
+          sourceSuggestions={suggestions}
+        />
       ) : (
         <UpgradeForm
           partnerId={effectivePartnerId}
           onCreated={handleCreated}
           onSuggestPurchase={() => setMode("purchase")}
+          sourceSuggestions={suggestions}
         />
       )}
 

@@ -10,6 +10,8 @@ export type ResolvedCustomer = {
   userName: string;
   /** Đã có tài khoản FireAnt khớp username/email này chưa */
   hasAccount: boolean;
+  /** AspNetUsers.Id khi đã có tài khoản — mã khuyến mại bắt buộc có (service_ApplyVoucher) */
+  userId: string | null;
 };
 
 /**
@@ -29,7 +31,7 @@ export async function resolveCustomerUserName(input: string): Promise<ResolvedCu
 
   const existing = await findFireAntUser(value);
   if (existing) {
-    return { userName: existing.userName, hasAccount: true };
+    return { userName: existing.userName, hasAccount: true, userId: existing.id };
   }
 
   if (!EMAIL_RE.test(value)) {
@@ -38,5 +40,5 @@ export async function resolveCustomerUserName(input: string): Promise<ResolvedCu
     );
   }
 
-  return { userName: value.toLowerCase(), hasAccount: false };
+  return { userName: value.toLowerCase(), hasAccount: false, userId: null };
 }

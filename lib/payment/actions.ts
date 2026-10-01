@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import type { Session } from "next-auth";
-import { createPaymentSchema, createUpgradePaymentSchema } from "@/lib/validations/payment";
+import {
+  createPaymentExtrasSchema,
+  createPaymentSchema,
+  createUpgradePaymentSchema,
+  sourceSchema,
+  voucherCodeSchema,
+} from "@/lib/validations/payment";
 import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
@@ -11,14 +17,23 @@ import { getPartner } from "@/lib/data/partners";
 import { CustomerUserNameError, resolveCustomerUserName } from "@/lib/payment/customer";
 import { getUpgradeQuote, type UpgradeQuote } from "@/lib/data/membership";
 import {
+  VOUCHER_FULL_DISCOUNT_MESSAGE,
+  VoucherApplyError,
+  cancelPartnerOrderQuietly,
   createPartnerPaymentOrder,
   createPartnerUpgradeOrder,
   getPackageInfo,
 } from "@/lib/payment/order-payment";
 import { buildUpgradePaymentLink } from "@/lib/payment/upgrade-link";
+import { buildVoucherPaymentLink, normalizeVoucherCode } from "@/lib/payment/voucher-link";
+import { previewVoucher } from "@/lib/payment/voucher";
 import { durationLabel, tierName } from "@/lib/payment/tiers";
 
-import type { CreatePaymentState } from "@/lib/payment/types";
+import type { AppliedVoucher, CreatePaymentState, VoucherPreview } from "@/lib/payment/types";
+
+/** service_ApplyVoucher bắt buộc AspNetUsers.Id — khách chỉ có email thì chưa dùng mã được. */
+const VOUCHER_NEEDS_ACCOUNT =
+  "Mã khuyến mại chỉ dùng được khi khách đã có tài khoản FireAnt. Nhờ khách đăng ký trước, hoặc bỏ mã để tạo link giá gốc.";
 
 
 function appBaseUrl(): string {
@@ -88,12 +103,19 @@ export async function createPaymentAction(
     customerEmail: formData.get("customerEmail") ?? "",
     note: formData.get("note") ?? "",
   });
+  const extras = createPaymentExtrasSchema.safeParse({
+    voucherCode: formData.get("voucherCode") ?? "",
+    source: formData.get("source") ?? "",
+  });
 
-  if (!parsed.success) {
+  if (!parsed.success || !extras.success) {
     return {
       ok: false,
       error: "Dữ liệu không hợp lệ.",
-      fieldErrors: parsed.error.flatten().fieldErrors,
+      fieldErrors: {
+        ...(parsed.success ? {} : parsed.error.flatten().fieldErrors),
+        ...(extras.success ? {} : extras.error.flatten().fieldErrors),
+      },
     };
   }
 
@@ -101,6 +123,7 @@ export async function createPaymentAction(
     const resolved = await resolvePartner(session, formData);
     if ("error" in resolved) return resolved.error;
     const { partnerId } = resolved;
+    const { voucherCode, source } = extras.data;
 
     // Giá lấy từ DB, không tin số tiền client gửi lên.
     const pkg = await getPackageInfo(parsed.data.packageId);
@@ -111,10 +134,12 @@ export async function createPaymentAction(
     // chưa có thì bắt buộc là email và hạ về chữ thường (xem lib/payment/customer.ts).
     let customerUserName: string;
     let customerHasAccount: boolean;
+    let customerUserId: string | null;
     try {
       const resolvedCustomer = await resolveCustomerUserName(parsed.data.customerEmail);
       customerUserName = resolvedCustomer.userName;
       customerHasAccount = resolvedCustomer.hasAccount;
+      customerUserId = resolvedCustomer.userId;
     } catch (err) {
       if (err instanceof CustomerUserNameError) {
         return {
@@ -126,37 +151,81 @@ export async function createPaymentAction(
       throw err;
     }
 
-    const code = generateShortCode(8);
-    const shortLink = buildShortLink(appBaseUrl(), code);
+    // Mã khuyến mại: kiểm tra lại trên server (không tin kết quả "Áp dụng" ở client) TRƯỚC
+    // khi tạo đơn, để mã sai không sinh đơn rác. Lượt dùng chỉ bị tính khi áp vào đơn.
+    let voucher: { code: string; userId: string; title: string } | null = null;
+    if (voucherCode) {
+      const failed = (message: string): CreatePaymentState => ({
+        ok: false,
+        error: message,
+        fieldErrors: { voucherCode: [message] },
+      });
+      if (!customerUserId) return failed(VOUCHER_NEEDS_ACCOUNT);
 
-    // URL thanh toán thực tế với packageId, couponCode và userName
-    const paymentBaseUrl = process.env.PAYMENT_BASE_URL ?? "https://fireant.vn/checkout";
-    const paymentUrl = new URL(paymentBaseUrl);
-    paymentUrl.searchParams.set("packageId", String(parsed.data.packageId));
-    paymentUrl.searchParams.set("paymentMethod", "1");
-    paymentUrl.searchParams.set("couponCode", code);
-    paymentUrl.searchParams.set("userName", customerUserName);
-    const paymentLink = paymentUrl.toString();
+      const check = await previewVoucher({
+        code: voucherCode,
+        packageId: parsed.data.packageId,
+        userId: customerUserId,
+        orderAmount: amount,
+      });
+      if (!check.ok) return failed(check.message);
+      if (amount - check.discountAmount <= 0) return failed(VOUCHER_FULL_DISCOUNT_MESSAGE);
+
+      voucher = { code: voucherCode, userId: customerUserId, title: check.title };
+    }
+
+    const code = generateShortCode(8);
+    const baseUrl = appBaseUrl();
+    const shortLink = buildShortLink(baseUrl, code);
+
+    // Có mã khuyến mại thì link về trang QR của Partners, KHÔNG sang checkout Corporate:
+    // /pay có couponCode huỷ đơn đã giảm giá và tạo đơn giá gốc (lib/payment/voucher-link.ts).
+    const paymentLink = voucher
+      ? buildVoucherPaymentLink(baseUrl, code, {
+          packageId: parsed.data.packageId,
+          userName: customerUserName,
+          voucherCode: voucher.code,
+        })
+      : buildCheckoutLink(code, parsed.data.packageId, customerUserName);
+    const publicLink = voucher ? shortLink : paymentLink;
 
     const note = parsed.data.note?.trim() || null;
 
-    const paymentOrder = await createPartnerPaymentOrder({
-      packageId: parsed.data.packageId,
-      userName: customerUserName,
-      amount,
-      couponCode: code,
-      note,
-      staff: staffOf(session),
-    });
+    let paymentOrder: Awaited<ReturnType<typeof createPartnerPaymentOrder>>;
+    try {
+      paymentOrder = await createPartnerPaymentOrder({
+        packageId: parsed.data.packageId,
+        userName: customerUserName,
+        amount,
+        couponCode: code,
+        note,
+        staff: staffOf(session),
+        voucher: voucher ? { code: voucher.code, userId: voucher.userId } : null,
+      });
+    } catch (err) {
+      if (err instanceof VoucherApplyError) {
+        return { ok: false, error: err.message, fieldErrors: { voucherCode: [err.message] } };
+      }
+      throw err;
+    }
 
-    await createCoupon({
-      partnerId,
-      code,
-      paymentLink,
-      packageId: parsed.data.packageId,
-      userName: customerUserName,
-      note,
-    });
+    try {
+      await createCoupon({
+        partnerId,
+        code,
+        paymentLink,
+        packageId: parsed.data.packageId,
+        userName: customerUserName,
+        note,
+        source,
+        voucherCode: voucher?.code ?? null,
+        discountAmount: paymentOrder.voucher?.discountAmount ?? null,
+      });
+    } catch (err) {
+      // Đơn đã giữ một lượt của mã mà không có coupon thì không ai gửi được link — trả lượt lại.
+      if (voucher) await cancelPartnerOrderQuietly(paymentOrder.orderId, `Khong tao duoc coupon ${code}`);
+      throw err;
+    }
 
     revalidateAfterCreate();
 
@@ -165,6 +234,16 @@ export async function createPaymentAction(
       ? pkg.packageName ?? `Khóa học #${pkg.packageId}`
       : `${tierName(pkg.serviceId ?? 33)} · ${durationLabel(pkg.months)}`;
 
+    const appliedVoucher: AppliedVoucher | null =
+      voucher && paymentOrder.voucher
+        ? {
+            code: voucher.code,
+            title: voucher.title,
+            discountAmount: paymentOrder.voucher.discountAmount,
+            benefit: paymentOrder.voucher.benefit,
+          }
+        : null;
+
     return {
       ok: true,
       result: {
@@ -172,14 +251,14 @@ export async function createPaymentAction(
         code,
         shortLink,
         paymentLink,
-        publicLink: paymentLink,
-        qrCodeUrl: paymentOrder.qrCodeUrl || (await qrToDataUrl(paymentLink)),
+        publicLink,
+        qrCodeUrl: paymentOrder.qrCodeUrl || (await qrToDataUrl(publicLink)),
         orderId: paymentOrder.orderId,
         accountNumber: paymentOrder.accountNumber,
         transferContent: paymentOrder.transferContent,
         qrPending: paymentOrder.qrPending,
         isMock: paymentOrder.isMock,
-        orderAmount: amount,
+        orderAmount: paymentOrder.amount,
         customerEmail: customerUserName,
         customerHasAccount,
         note,
@@ -188,11 +267,87 @@ export async function createPaymentAction(
         modeLabel: null,
         expectedEndDate: null,
         fromServiceId: null,
+        listAmount: amount,
+        voucher: appliedVoucher,
+        source,
       },
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Tạo link thất bại.";
     return { ok: false, error: message };
+  }
+}
+
+/** Link checkout Corporate cho coupon mua gói KHÔNG có mã khuyến mại (như trước). */
+function buildCheckoutLink(code: string, packageId: number, userName: string): string {
+  const paymentBaseUrl = process.env.PAYMENT_BASE_URL ?? "https://fireant.vn/checkout";
+  const paymentUrl = new URL(paymentBaseUrl);
+  paymentUrl.searchParams.set("packageId", String(packageId));
+  paymentUrl.searchParams.set("paymentMethod", "1");
+  paymentUrl.searchParams.set("couponCode", code);
+  paymentUrl.searchParams.set("userName", userName);
+  return paymentUrl.toString();
+}
+
+/** Kiểm tra mã khuyến mại cho gói + khách đang nhập ở /payment/create — không ghi gì. */
+export async function previewVoucherAction(input: {
+  code: string;
+  packageId: number;
+  customer: string;
+}): Promise<VoucherPreview> {
+  const rawCode = String(input.code ?? "");
+  const packageId = Number(input.packageId);
+  const customer = String(input.customer ?? "").trim();
+  const base = { code: normalizeVoucherCode(rawCode), packageId, customer };
+  const failed = (error: string, field: "voucherCode" | "customerEmail" = "voucherCode"): VoucherPreview => ({
+    ok: false,
+    ...base,
+    error,
+    field,
+  });
+
+  const session = await auth();
+  if (!session?.user) return failed("Phiên đăng nhập đã hết hạn. Vui lòng tải lại trang.");
+
+  const parsedCode = voucherCodeSchema.safeParse(rawCode);
+  if (!parsedCode.success) return failed(parsedCode.error.issues[0]?.message ?? "Mã khuyến mại không hợp lệ.");
+  if (!parsedCode.data) return failed("Nhập mã khuyến mại.");
+  if (!Number.isInteger(packageId) || packageId <= 0) return failed("Chọn gói dịch vụ trước khi áp mã.");
+  if (!customer) return failed("Nhập tài khoản FireAnt của khách trước khi áp mã.", "customerEmail");
+
+  try {
+    const pkg = await getPackageInfo(packageId);
+    const listAmount = Math.round(pkg.amount);
+
+    let userId: string | null;
+    try {
+      userId = (await resolveCustomerUserName(customer)).userId;
+    } catch (err) {
+      if (err instanceof CustomerUserNameError) return failed(err.message, "customerEmail");
+      throw err;
+    }
+    if (!userId) return failed(VOUCHER_NEEDS_ACCOUNT);
+
+    const check = await previewVoucher({ code: parsedCode.data, packageId, userId, orderAmount: listAmount });
+    if (!check.ok) return failed(check.message);
+
+    const finalAmount = listAmount - check.discountAmount;
+    if (finalAmount <= 0) return failed(VOUCHER_FULL_DISCOUNT_MESSAGE);
+
+    return {
+      ok: true,
+      ...base,
+      title: check.title,
+      discountAmount: check.discountAmount,
+      benefit: check.benefit,
+      listAmount,
+      finalAmount,
+      expiresAt: check.expiresAt?.toISOString() ?? null,
+      remainingUses: check.remainingUses,
+    };
+  } catch (err) {
+    console.error("[previewVoucherAction]", err);
+    return failed("Chưa kiểm tra được mã khuyến mại, vui lòng thử lại.");
   }
 }
 
@@ -228,12 +383,18 @@ export async function createUpgradePaymentAction(
     option: formData.get("option") ?? "",
     note: formData.get("note") ?? "",
   });
+  // Nâng cấp không nhận mã khuyến mại: service_ProcessUpgradeOrder chỉ làm việc với
+  // UpgradeAmount và số tiền đó còn quy đổi thành ngày sử dụng — chỉ gắn nguồn khách.
+  const parsedSource = sourceSchema.safeParse(formData.get("source") ?? "");
 
-  if (!parsed.success) {
+  if (!parsed.success || !parsedSource.success) {
     return {
       ok: false,
       error: "Dữ liệu không hợp lệ.",
-      fieldErrors: parsed.error.flatten().fieldErrors,
+      fieldErrors: {
+        ...(parsed.success ? {} : parsed.error.flatten().fieldErrors),
+        ...(parsedSource.success ? {} : { source: parsedSource.error.issues.map((i) => i.message) }),
+      },
     };
   }
 
@@ -241,6 +402,7 @@ export async function createUpgradePaymentAction(
     const resolved = await resolvePartner(session, formData);
     if ("error" in resolved) return resolved.error;
     const { partnerId } = resolved;
+    const source = parsedSource.data;
 
     // Luôn tính lại báo giá trên server — số tiền trên QR không lấy từ client.
     const quote = await getUpgradeQuote(parsed.data.customerEmail);
@@ -297,6 +459,7 @@ export async function createUpgradePaymentAction(
       packageId: option.packageId,
       userName: quote.userName,
       note,
+      source,
     });
 
     revalidateAfterCreate();
@@ -325,6 +488,9 @@ export async function createUpgradePaymentAction(
         modeLabel,
         expectedEndDate: option.endDate,
         fromServiceId: quote.current.serviceId,
+        listAmount: null,
+        voucher: null,
+        source,
       },
     };
   } catch (err) {

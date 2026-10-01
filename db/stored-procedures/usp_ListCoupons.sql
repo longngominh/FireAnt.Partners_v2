@@ -3,7 +3,8 @@ CREATE OR ALTER PROCEDURE usp_ListCoupons
   @Status    NVARCHAR(20)  = 'ALL',
   @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
   @Offset    INT           = 0,
-  @PageSize  INT           = 20
+  @PageSize  INT           = 20,
+  @Source    NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -37,9 +38,17 @@ BEGIN
       cp.CreatedDate,
       cp.ExpireDate,
       cp.UserName,
-      cp.Note
+      cp.Note,
+      cp.Source,
+      cp.VoucherCode,
+      cp.DiscountAmount
     FROM Coupons cp
     WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (
+        @Source IS NULL
+        OR (@Source = N'' AND cp.Source IS NULL)
+        OR cp.Source = @Source
+      )
       AND (
         @Status = 'ALL'
         OR (@Status = 'PAID'    AND cp.IsUsed = 1)
@@ -55,6 +64,8 @@ BEGIN
         @Q IS NULL
         OR cp.CouponCode LIKE @Q
         OR ISNULL(cp.UserName, '') LIKE @Q
+        OR ISNULL(cp.Source, '') LIKE @Q
+        OR ISNULL(cp.VoucherCode, '') LIKE @Q
         OR cp.PaymentLink LIKE @Q
         OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
       )
@@ -71,8 +82,9 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
-    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn (vw_PaidOrders đã trừ voucher); chưa thanh
+    -- toán: giá gói trong link trừ khoản giảm của mã khuyến mại lúc tạo link.
+    COALESCE(o.Amount, pkg.Amount - ISNULL(cp.DiscountAmount, 0), 0)     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -86,7 +98,10 @@ BEGIN
     )                                                                     AS CustomerName,
     pkg.PackageName,
     cp.UserName,
-    cp.Note
+    cp.Note,
+    cp.Source,
+    cp.VoucherCode,
+    cp.DiscountAmount
   FROM  PagedCoupons cp
   LEFT  JOIN PaidByCoupon pbc ON pbc.CouponCode = cp.CouponCode
   LEFT  JOIN vw_PaidOrders o  ON o.OrderID      = pbc.OrderID

@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
     partnerId,
     status:   (sp.get("status") ?? "ALL") as CouponStatus | "ALL",
     q:        sp.get("q")        ?? "",
+    source:   sp.get("source"),
     page:     Number(sp.get("page")     ?? "1") || 1,
     pageSize: Number(sp.get("pageSize") ?? "20") || 20,
   });

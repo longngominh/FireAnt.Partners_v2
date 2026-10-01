@@ -9,6 +9,8 @@ import {
 } from "@/components/features/payment/create-payment-workspace";
 import { listPackages } from "@/lib/data/packages";
 import { listPartners } from "@/lib/data/partners";
+import { listCouponSources } from "@/lib/data/payment";
+import { sourceSuggestions } from "@/lib/payment/source";
 
 export const metadata = { title: "Tạo link thanh toán" };
 
@@ -21,10 +23,13 @@ export default async function CreatePaymentPage({
 }) {
   const [session, params] = await Promise.all([auth(), searchParams]);
   const isAdmin = session?.user.role === "admin";
+  const sessionPartnerId = session?.user.partnerId ?? null;
 
-  const [packages, partnerRows] = await Promise.all([
+  const [packages, partnerRows, usedSources] = await Promise.all([
     listPackages(),
     isAdmin ? listPartners() : Promise.resolve([]),
+    // Gợi ý nguồn: nguồn đối tác này đã dùng (admin: của mọi đối tác).
+    isAdmin || sessionPartnerId ? listCouponSources(isAdmin ? null : sessionPartnerId) : Promise.resolve([]),
   ]);
 
   const partners: PartnerOption[] = partnerRows
@@ -40,7 +45,8 @@ export default async function CreatePaymentPage({
           <h1 className="text-2xl font-semibold tracking-tight">Tạo link thanh toán</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Bán gói hội viên, khóa học hoặc nâng cấp hạng cho khách đang dùng. Hệ thống tạo đơn hàng, link rút gọn và
-            QR chuyển khoản định danh ngay lập tức — kích hoạt tự động khi nhận tiền.
+            QR chuyển khoản định danh ngay lập tức — kích hoạt tự động khi nhận tiền. Có thể áp mã khuyến mại do
+            FireAnt cấp và gắn nguồn khách để theo dõi.
           </p>
         </div>
         <Button asChild variant="outline" className="gap-2">
@@ -55,8 +61,9 @@ export default async function CreatePaymentPage({
         packages={packages}
         isAdmin={isAdmin}
         partners={partners}
-        sessionPartnerId={session?.user.partnerId ?? null}
+        sessionPartnerId={sessionPartnerId}
         defaultMode={defaultMode}
+        sourceSuggestions={sourceSuggestions(usedSources)}
       />
     </div>
   );

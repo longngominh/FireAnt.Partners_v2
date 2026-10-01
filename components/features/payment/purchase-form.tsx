@@ -8,7 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatVND } from "@/lib/utils/currency";
 import { createPaymentAction } from "@/lib/payment/actions";
-import { createPaymentInitialState, type CreatePaymentResult, type CreatePaymentState } from "@/lib/payment/types";
+import {
+  createPaymentInitialState,
+  type CreatePaymentResult,
+  type CreatePaymentState,
+  type VoucherPreview,
+} from "@/lib/payment/types";
+import { normalizeSource } from "@/lib/payment/source";
 import { durationLabel, tierMeta } from "@/lib/payment/tiers";
 import type { ServicePackage } from "@/lib/data/packages";
 import { cn } from "@/lib/utils";
@@ -21,12 +27,15 @@ import {
   TierBadge,
   perMonth,
 } from "./form-bits";
+import { SourceField } from "./source-field";
+import { VoucherField, isCurrentPreview } from "./voucher-field";
 
 type Props = {
   packages: ServicePackage[];
   /** Admin tạo thay cho đối tác; partner thường để null (lấy từ phiên) */
   partnerId: string | null;
   onCreated: (result: CreatePaymentResult) => void;
+  sourceSuggestions: string[];
 };
 
 type ServiceGroup = {
@@ -36,7 +45,7 @@ type ServiceGroup = {
   packages: ServicePackage[];
 };
 
-export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
+export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions }: Props) {
   const [state, action, pending] = useActionState<CreatePaymentState, FormData>(
     createPaymentAction,
     createPaymentInitialState,
@@ -64,9 +73,40 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
   const [customer, setCustomer] = useState("");
   const [note, setNote] = useState("");
+  const [source, setSource] = useState("");
+  const [voucherCode, setVoucherCode] = useState("");
+  const [voucherPreview, setVoucherPreview] = useState<VoucherPreview | null>(null);
+  // Kết quả "Áp dụng" lúc bấm tạo link — server bác mã (vừa hết lượt, hết hạn…) thì lỗi chỉ
+  // gắn với đúng kết quả đó, áp dụng lại là hết.
+  const [submittedVoucher, setSubmittedVoucher] = useState<VoucherPreview | null>(null);
 
   const currentService = services.find((s) => s.serviceId === selectedServiceId) ?? null;
   const isCourse = currentService?.isCourse ?? false;
+
+  const rejectedOnSubmit =
+    !pending && voucherPreview !== null && submittedVoucher === voucherPreview
+      ? (state.fieldErrors?.voucherCode?.[0] ?? null)
+      : null;
+  const effectivePreview: VoucherPreview | null =
+    rejectedOnSubmit && voucherPreview
+      ? {
+          ok: false,
+          code: voucherPreview.code,
+          packageId: voucherPreview.packageId,
+          customer: voucherPreview.customer,
+          error: rejectedOnSubmit,
+          field: "voucherCode",
+        }
+      : voucherPreview;
+
+  // Mã chỉ được gửi lên khi kết quả "Áp dụng" còn khớp mã + gói + khách đang nhập.
+  const currentVoucher = isCurrentPreview(effectivePreview, voucherCode, selectedPackage?.packageId ?? null, customer)
+    ? effectivePreview
+    : null;
+  const appliedVoucher = currentVoucher?.ok ? currentVoucher : null;
+  const voucherUnchecked = voucherCode.trim() !== "" && !appliedVoucher;
+  const finalAmount = appliedVoucher ? appliedVoucher.finalAmount : (selectedPackage?.amount ?? 0);
+  const sourceLabel = normalizeSource(source);
 
   // Giá tham chiếu (gói ngắn nhất của hạng) để hiển thị % tiết kiệm của gói dài hơn
   const baseMonthly = useMemo(() => {
@@ -84,16 +124,23 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
       onCreated(state.result);
       setSelectedPackage(null);
       setNote("");
+      // Mã khuyến mại thường dùng cho một đơn; nguồn giữ lại vì hay tạo nhiều link cùng kênh.
+      setVoucherCode("");
+      setVoucherPreview(null);
     } else if (state.error && state.error !== lastSeenErrorRef.current) {
       lastSeenErrorRef.current = state.error;
       toast.error(state.error);
     }
   }, [state, onCreated]);
 
-  const canSubmit = !!selectedPackage && customer.trim().length > 0 && !pending;
+  const canSubmit = !!selectedPackage && customer.trim().length > 0 && !voucherUnchecked && !pending;
 
   return (
-    <form action={action} className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+    <form
+      action={action}
+      onSubmit={() => setSubmittedVoucher(voucherPreview)}
+      className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start"
+    >
       {selectedPackage ? (
         <>
           <input type="hidden" name="packageId" value={selectedPackage.packageId} />
@@ -101,6 +148,7 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
         </>
       ) : null}
       {partnerId ? <input type="hidden" name="partnerId" value={partnerId} /> : null}
+      {appliedVoucher ? <input type="hidden" name="voucherCode" value={appliedVoucher.code} /> : null}
 
       <div className="flex flex-col gap-5">
         <StepCard
@@ -241,7 +289,15 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
               )}
             </div>
 
-            <div className="flex flex-col gap-2">
+            <SourceField
+              id="source"
+              value={source}
+              onChange={setSource}
+              suggestions={sourceSuggestions}
+              error={state.fieldErrors?.source?.[0]}
+            />
+
+            <div className="flex flex-col gap-2 sm:col-span-2">
               <Label htmlFor="note">
                 Ghi chú <span className="text-xs font-normal text-muted-foreground">(tuỳ chọn)</span>
               </Label>
@@ -284,20 +340,52 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
                   ? selectedPackage.packageName ?? `Khóa học #${selectedPackage.packageId}`
                   : `Hội viên ${selectedPackage.serviceName}`}
               </span>
-              <span className="num text-2xl font-bold tracking-tight text-primary">
-                {formatVND(selectedPackage.amount)}
-              </span>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span className="num text-2xl font-bold tracking-tight text-primary">{formatVND(finalAmount)}</span>
+                {appliedVoucher && appliedVoucher.discountAmount > 0 ? (
+                  <span className="num text-sm text-muted-foreground line-through">
+                    {formatVND(selectedPackage.amount)}
+                  </span>
+                ) : null}
+              </div>
             </div>
             <div className="flex flex-col gap-2">
               <SummaryRow label="Khách hàng" muted={!customer.trim()}>
                 <span className="block max-w-[180px] truncate">{customer.trim() || "Chưa nhập"}</span>
               </SummaryRow>
+              {sourceLabel ? (
+                <SummaryRow label="Nguồn">
+                  <span className="block max-w-[180px] truncate">{sourceLabel}</span>
+                </SummaryRow>
+              ) : null}
               <SummaryRow label="Thanh toán">Chuyển khoản / QR</SummaryRow>
+              {appliedVoucher ? (
+                <SummaryRow label="Mã khuyến mại">
+                  <span className="flex flex-col items-end">
+                    <code className="font-mono text-xs font-semibold">{appliedVoucher.code}</code>
+                    <span className="num text-xs font-medium text-success">
+                      {appliedVoucher.discountAmount > 0
+                        ? `−${formatVND(appliedVoucher.discountAmount)}`
+                        : appliedVoucher.benefit}
+                    </span>
+                  </span>
+                </SummaryRow>
+              ) : null}
               {note.trim() ? (
                 <SummaryRow label="Ghi chú">
                   <span className="block max-w-[180px] truncate">{note.trim()}</span>
                 </SummaryRow>
               ) : null}
+            </div>
+            <div className="border-t pt-4">
+              <VoucherField
+                code={voucherCode}
+                onCodeChange={setVoucherCode}
+                preview={effectivePreview}
+                onPreviewChange={setVoucherPreview}
+                packageId={selectedPackage.packageId}
+                customer={customer}
+              />
             </div>
           </>
         ) : (
@@ -308,6 +396,11 @@ export function PurchaseForm({ packages, partnerId, onCreated }: Props) {
           <LinkIcon className="size-4" />
           {pending ? "Đang tạo link…" : "Tạo link & mã QR"}
         </Button>
+        {voucherUnchecked && selectedPackage && !pending ? (
+          <p className="-mt-2 text-center text-xs text-muted-foreground">
+            Áp dụng hoặc bỏ mã khuyến mại để tạo link.
+          </p>
+        ) : null}
       </SummaryCard>
     </form>
   );

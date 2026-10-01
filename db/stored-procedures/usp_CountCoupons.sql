@@ -1,7 +1,8 @@
 CREATE OR ALTER PROCEDURE usp_CountCoupons
   @PartnerId INT           = NULL,
   @Status    NVARCHAR(20)  = 'ALL',
-  @Q         NVARCHAR(200) = NULL    -- truyền dạng '%keyword%' từ app
+  @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
+  @Source    NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -23,6 +24,11 @@ BEGIN
   FROM  Coupons cp
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND (
+      @Source IS NULL
+      OR (@Source = N'' AND cp.Source IS NULL)
+      OR cp.Source = @Source
+    )
+    AND (
       @Status = 'ALL'
       OR (@Status = 'PAID'    AND cp.IsUsed = 1)
       OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
@@ -37,6 +43,8 @@ BEGIN
       @Q IS NULL
       OR cp.CouponCode LIKE @Q
       OR ISNULL(cp.UserName,'') LIKE @Q
+      OR ISNULL(cp.Source, '') LIKE @Q
+      OR ISNULL(cp.VoucherCode, '') LIKE @Q
       OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
     );
 END;

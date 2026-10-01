@@ -1,4 +1,5 @@
 import { getPool, sql } from "@/lib/db/sql";
+import { SOURCE_MAX_LENGTH, SOURCE_NONE, normalizeSource } from "@/lib/payment/source";
 
 export type CouponStatus = "PENDING" | "PAID" | "EXPIRED" | "USED";
 
@@ -19,12 +20,20 @@ export type Coupon = {
   status: CouponStatus;
   userName: string | null;
   note: string | null;
+  /** Nguồn khách CTV gắn khi tạo link */
+  source: string | null;
+  /** Mã khuyến mại đã áp vào đơn của link */
+  voucherCode: string | null;
+  /** Khoản giảm của mã lúc tạo link (0 với mã tặng ngày) */
+  discountAmount: number | null;
 };
 
 export type CouponListFilter = {
   partnerId?: string | number | null;
   status?: CouponStatus | "ALL";
   q?: string;
+  /** Tên nguồn, hoặc SOURCE_NONE = link chưa gắn nguồn; bỏ trống = mọi nguồn */
+  source?: string | null;
   page?: number;
   pageSize?: number;
 };
@@ -51,7 +60,20 @@ type CouponRow = {
   PackageName: string | null;
   UserName: string | null;
   Note: string | null;
+  Source: string | null;
+  VoucherCode: string | null;
+  DiscountAmount: number | null;
 };
+
+/**
+ * Giá trị @Source cho các proc lọc theo nguồn: NULL = mọi nguồn, N'' = chưa gắn nguồn.
+ * Dùng chung cho /payment và /customers.
+ */
+export function sourceFilterParam(source: string | null | undefined): string | null {
+  if (!source) return null;
+  if (source === SOURCE_NONE) return "";
+  return normalizeSource(source)?.slice(0, SOURCE_MAX_LENGTH) ?? null;
+}
 
 function deriveStatus(r: CouponRow): CouponStatus {
   if (r.IsPaid) return "PAID";
@@ -78,11 +100,14 @@ function mapCoupon(r: CouponRow): Coupon {
     status: deriveStatus(r),
     userName: r.UserName ?? null,
     note: r.Note ?? null,
+    source: r.Source ?? null,
+    voucherCode: r.VoucherCode ?? null,
+    discountAmount: r.DiscountAmount ?? null,
   };
 }
 
 export async function listCoupons(filter: CouponListFilter = {}): Promise<CouponListResult> {
-  const { partnerId = null, status = "ALL", q = "", page = 1, pageSize = 20 } = filter;
+  const { partnerId = null, status = "ALL", q = "", source = null, page = 1, pageSize = 20 } = filter;
   try {
     const numPartnerId =
       partnerId !== null && partnerId !== undefined
@@ -94,25 +119,34 @@ export async function listCoupons(filter: CouponListFilter = {}): Promise<Coupon
     const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
     const offset = (page - 1) * pageSize;
     const qParam = q.trim() ? `%${q.trim()}%` : null;
+    const sourceParam = sourceFilterParam(source);
 
     const pool = await getPool();
 
-    const dataRes = await pool
+    const dataReq = pool
       .request()
       .input("PartnerId", sql.Int,           validPartnerId)
       .input("Status",    sql.NVarChar(20),   status)
       .input("Q",         sql.NVarChar(200),  qParam)
       .input("Offset",    sql.Int,            offset)
-      .input("PageSize",  sql.Int,            pageSize)
-      .execute<CouponRow>("usp_ListCoupons");
+      .input("PageSize",  sql.Int,            pageSize);
 
     type CountRow = { Total: number };
-    const countRes = await pool
+    const countReq = pool
       .request()
       .input("PartnerId", sql.Int,          validPartnerId)
       .input("Status",    sql.NVarChar(20),  status)
-      .input("Q",         sql.NVarChar(200), qParam)
-      .execute<CountRow>("usp_CountCoupons");
+      .input("Q",         sql.NVarChar(200), qParam);
+
+    // @Source chỉ gửi khi đang lọc, để proc bản trước (chưa chạy lại
+    // db/all-stored-procedures.sql) vẫn trả được danh sách.
+    if (sourceParam !== null) {
+      dataReq.input("Source", sql.NVarChar(50), sourceParam);
+      countReq.input("Source", sql.NVarChar(50), sourceParam);
+    }
+
+    const dataRes = await dataReq.execute<CouponRow>("usp_ListCoupons");
+    const countRes = await countReq.execute<CountRow>("usp_CountCoupons");
 
     return {
       rows: dataRes.recordset.map(mapCoupon),
@@ -152,6 +186,9 @@ export type CreateCouponInput = {
   packageId?: number | null;
   userName?: string | null;
   note?: string | null;
+  source?: string | null;
+  voucherCode?: string | null;
+  discountAmount?: number | null;
 };
 
 export async function createCoupon(input: CreateCouponInput): Promise<{ id: number; code: string }> {
@@ -165,14 +202,22 @@ export async function createCoupon(input: CreateCouponInput): Promise<{ id: numb
   const pool = await getPool();
 
   type InsertRow = { CouponID: number };
-  const res = await pool
+  const req = pool
     .request()
     .input("PartnerId",   sql.Int,               numPartnerId)
     .input("CouponCode",  sql.NVarChar(50),       input.code)
     .input("PaymentLink", sql.NVarChar(sql.MAX),  input.paymentLink)
     .input("UserName",    sql.NVarChar(256),      input.userName ?? null)
-    .input("Note",        sql.NVarChar(sql.MAX),  input.note ?? null)
-    .execute<InsertRow>("usp_CreateCoupon");
+    .input("Note",        sql.NVarChar(sql.MAX),  input.note ?? null);
+
+  // Chỉ gửi khi có giá trị: link không có nguồn/mã vẫn tạo được với proc bản trước.
+  if (input.source) req.input("Source", sql.NVarChar(50), input.source);
+  if (input.voucherCode) {
+    req.input("VoucherCode", sql.NVarChar(20), input.voucherCode);
+    req.input("DiscountAmount", sql.Decimal(18, 2), input.discountAmount ?? 0);
+  }
+
+  const res = await req.execute<InsertRow>("usp_CreateCoupon");
 
   const newId = res.recordset[0]?.CouponID;
   if (!newId) throw new Error("INSERT Coupons thất bại — không lấy được CouponID.");
@@ -186,4 +231,25 @@ export async function createCoupon(input: CreateCouponInput): Promise<{ id: numb
   }
 
   return { id: newId, code: input.code };
+}
+
+/**
+ * Các nguồn khách đối tác đã gắn cho link (mới dùng gần nhất trước) — gợi ý ở trang tạo
+ * link và danh sách cho ô lọc. partnerId null = mọi đối tác (admin).
+ */
+export async function listCouponSources(partnerId: string | number | null): Promise<string[]> {
+  const numPartnerId =
+    partnerId === null ? null : typeof partnerId === "string" ? parseInt(partnerId, 10) : partnerId;
+
+  try {
+    const pool = await getPool();
+    const res = await pool
+      .request()
+      .input("PartnerId", sql.Int, numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null)
+      .execute<{ Source: string | null }>("usp_ListCouponSources");
+    return res.recordset.map((r) => r.Source?.trim() ?? "").filter(Boolean);
+  } catch (err) {
+    console.error("[listCouponSources]", err);
+    return [];
+  }
 }

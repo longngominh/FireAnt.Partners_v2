@@ -22,8 +22,9 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
-    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn (vw_PaidOrders đã trừ voucher); chưa thanh
+    -- toán: giá gói trong link trừ khoản giảm của mã khuyến mại lúc tạo link.
+    COALESCE(o.Amount, pkg.Amount - ISNULL(cp.DiscountAmount, 0), 0)     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -37,7 +38,10 @@ BEGIN
     )                                                                     AS CustomerName,
     pkg.PackageName,
     cp.UserName,
-    cp.Note
+    cp.Note,
+    cp.Source,
+    cp.VoucherCode,
+    cp.DiscountAmount
   FROM  Coupons cp
   LEFT  JOIN vw_PaidOrders o ON o.OrderID = @OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(

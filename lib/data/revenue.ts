@@ -65,16 +65,18 @@ type MonthlyRevenueRow = {
 const FALLBACK_QUERY = `
   WITH PaidOrders AS (
     -- Inline của db/views/vw_PaidOrders.sql: đơn IsPaid = 1,
-    -- Amount = doanh thu thực thu (đơn nâng cấp chỉ tính phần chênh lệch đã trả).
+    -- Amount = doanh thu thực thu (đơn nâng cấp chỉ tính phần chênh lệch đã trả,
+    -- đơn thường trừ khoản giảm của mã khuyến mại).
     SELECT
       o.OrderID, o.OrderDate, o.UserName, o.CouponCode,
       CASE
         WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
           THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-        ELSE ISNULL(pkg.Amount, 0)
+        ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
       END AS Amount
     FROM [EStocks_Data].[dbo].[service_Orders] o
     LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
     OUTER APPLY (
       SELECT SUM(up.Amount) AS Amount
       FROM [EStocks_Data].[dbo].[service_Upgrades] up
@@ -202,10 +204,11 @@ const FALLBACK_ORDERS_QUERY = `
       CASE
         WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
           THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-        ELSE ISNULL(pkg.Amount, 0)
+        ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
       END AS Amount
     FROM [EStocks_Data].[dbo].[service_Orders] o
     LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+    LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
     OUTER APPLY (
       SELECT SUM(up.Amount) AS Amount
       FROM [EStocks_Data].[dbo].[service_Upgrades] up

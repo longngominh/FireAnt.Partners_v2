@@ -4,7 +4,8 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
-  SELECT ISNULL(SUM(pkg.Amount), 0) AS PendingRevenue
+  -- Giá gói trong link trừ khoản giảm của mã khuyến mại (Coupons.DiscountAmount) nếu có.
+  SELECT ISNULL(SUM(pkg.Amount - ISNULL(cp.DiscountAmount, 0)), 0) AS PendingRevenue
   FROM  Coupons cp
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = TRY_CAST(SUBSTRING(
       cp.PaymentLink,

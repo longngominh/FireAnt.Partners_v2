@@ -2,31 +2,48 @@ import { getPool, sql } from "@/lib/db/sql";
 import { buildTransferContent, buildVietQRUrl } from "./vietqr";
 import { getOnePayClient, isOnePayMock } from "./onepay-client";
 import { isUpgradePaymentLink } from "./upgrade-link";
+import { isVoucherPaymentLink } from "./voucher-link";
+import { applyVoucherToOrder, cancelPendingPartnerOrder } from "./voucher";
 
 const PARTNER_NAME = "FireAnt";
 
 /** service_Orders.Status — mirror enum OrderStatus của FireAnt.Data */
 const ORDER_STATUS_PENDING = 0;
 const ORDER_STATUS_APPROVED = 1;
+const ORDER_STATUS_CANCELLED = 2;
 const ORDER_STATUS_INVALID = 3;
 const ORDER_STATUS_UPGRADE = 6;
+
+/** Mã khuyến mại không áp được vào đơn — action báo lỗi ở ô mã, không phải lỗi hệ thống. */
+export class VoucherApplyError extends Error {}
+
+/** Khách không chuyển được 0 ₫ nên mã giảm hết giá gói không tạo được link chuyển khoản. */
+export const VOUCHER_FULL_DISCOUNT_MESSAGE =
+  "Mã giảm toàn bộ giá gói nên không tạo được link chuyển khoản. Vui lòng liên hệ FireAnt để kích hoạt cho khách.";
 
 export type PartnerPaymentOrderInput = {
   packageId: number;
   userName: string;
+  /** Giá niêm yết của gói */
   amount: number;
   couponCode: string;
   note?: string | null;
   staff: string;
+  /** Mã khuyến mại (đã kiểm tra) + AspNetUsers.Id của khách */
+  voucher?: { code: string; userId: string } | null;
 };
 
 export type PartnerPaymentOrderResult = {
   orderId: number;
+  /** Số tiền trên QR — đã trừ mã khuyến mại nếu có */
+  amount: number;
   qrCodeUrl: string;
   accountNumber: string;
   transferContent: string;
   qrPending: boolean;
   isMock: boolean;
+  /** Mã khuyến mại vừa ghi vào đơn mới tạo (null khi dùng lại đơn có sẵn) */
+  voucher: { discountAmount: number; benefit: string } | null;
 };
 
 export type PartnerUpgradeOrderInput = {
@@ -59,7 +76,48 @@ export async function createPartnerPaymentOrder(
     comment: input.note ?? "",
     staff: input.staff,
   });
-  return buildPaymentOrderResult(orderId, input.amount);
+
+  if (!input.voucher) {
+    return buildPaymentOrderResult(orderId, input.amount);
+  }
+
+  // Mã khuyến mại ghi theo OrderID nên chỉ áp được SAU khi có đơn (giống Pay.razor). Áp
+  // không được (hết lượt giữa lúc kiểm tra và lúc tạo…) thì huỷ đơn — không phát QR giá gốc
+  // cho một link mà CTV tưởng là đã giảm.
+  let applied: Awaited<ReturnType<typeof applyVoucherToOrder>>;
+  try {
+    applied = await applyVoucherToOrder({
+      code: input.voucher.code,
+      packageId: input.packageId,
+      orderId,
+      userId: input.voucher.userId,
+      orderAmount: input.amount,
+    });
+  } catch (err) {
+    await cancelPartnerOrderQuietly(orderId, `Loi khi ap ma khuyen mai ${input.voucher.code}`);
+    throw err;
+  }
+
+  if (!applied.ok) {
+    await cancelPartnerOrderQuietly(orderId, `Khong ap duoc ma khuyen mai ${input.voucher.code} (result=${applied.resultCode})`);
+    throw new VoucherApplyError(applied.message);
+  }
+  if (applied.netAmount <= 0) {
+    await cancelPartnerOrderQuietly(orderId, `Ma khuyen mai ${input.voucher.code} giam toan bo gia goi`);
+    throw new VoucherApplyError(VOUCHER_FULL_DISCOUNT_MESSAGE);
+  }
+
+  const result = await buildPaymentOrderResult(orderId, applied.netAmount);
+  return { ...result, voucher: { discountAmount: applied.discountAmount, benefit: applied.benefit } };
+}
+
+/** Huỷ đơn + trả lượt mã; lỗi ở bước dọn dẹp chỉ ghi log để không che lỗi gốc. */
+export async function cancelPartnerOrderQuietly(orderId: number, reason: string): Promise<void> {
+  try {
+    await cancelPendingPartnerOrder(orderId, reason);
+  } catch (err) {
+    console.error(`[partner-payment] Không huỷ được đơn FA${orderId} (${reason}):`, err);
+  }
 }
 
 /**
@@ -151,9 +209,15 @@ export async function getOrCreatePartnerPaymentOrder(params: {
   staff: string;
 }): Promise<PartnerPaymentOrderResult> {
   const existing = await getOrderByCouponCode(params.couponCode);
+  const hasVoucher = isVoucherPaymentLink(params.paymentLink);
   if (existing) {
     if (existing.isPaid) {
       throw new Error("Đơn hàng gắn với mã coupon này đã thanh toán, không thể dùng lại QR.");
+    }
+    if (hasVoucher && existing.isClosed) {
+      // Đơn có mã khuyến mại đã bị huỷ (khách tự mua lại cùng gói trên fireant.vn, quá hạn
+      // chuyển khoản…): lượt mã đã được trả lại nên đơn về giá gốc — không phát lại QR.
+      throw new Error("Đơn của link này đã bị huỷ nên mã khuyến mại không còn giữ. Vui lòng tạo link mới.");
     }
 
     return buildPaymentOrderResult(existing.orderId, existing.amount);
@@ -163,6 +227,10 @@ export async function getOrCreatePartnerPaymentOrder(params: {
     // Đơn nâng cấp luôn được tạo cùng lúc với coupon; không tự tạo lại để tránh
     // sinh đơn mua trọn gói với giá niêm yết.
     throw new Error("Không tìm thấy đơn nâng cấp của mã này. Vui lòng tạo link nâng cấp mới.");
+  }
+  if (hasVoucher) {
+    // Tương tự: tạo lại ở đây sẽ ra đơn giá gốc, mất mã khuyến mại.
+    throw new Error("Không tìm thấy đơn của link có mã khuyến mại. Vui lòng tạo link mới.");
   }
 
   const parsed = parsePaymentLink(params.paymentLink);
@@ -202,18 +270,22 @@ async function buildPaymentOrderResult(
 
   return {
     orderId,
+    amount,
     qrCodeUrl,
     accountNumber,
     transferContent,
     qrPending,
     isMock: isOnePayMock(),
+    voucher: null,
   };
 }
 
 type ExistingOrderRow = {
   OrderID: number;
   Amount: number | null;
+  ListAmount: number | null;
   UpgradeAmount: number | null;
+  VoucherDiscount: number | null;
   Status: number | null;
   IsPaid: boolean | null;
   EndDate: Date | null;
@@ -221,10 +293,19 @@ type ExistingOrderRow = {
 
 export type CouponOrderState = {
   orderId: number;
-  /** Số tiền khách phải chuyển: UpgradeAmount với đơn nâng cấp, giá gói với đơn thường */
+  /**
+   * Số tiền khách phải chuyển: UpgradeAmount với đơn nâng cấp; giá gói trừ khoản giảm của
+   * mã khuyến mại với đơn thường (đúng công thức service_GetOrderWithUserInfo của webhook).
+   */
   amount: number;
+  /** Giá niêm yết của gói trên đơn */
+  listAmount: number;
+  /** Khoản giảm của mã khuyến mại đang ghi trên đơn (null = không có mã) */
+  voucherDiscount: number | null;
   isPaid: boolean;
   isUpgrade: boolean;
+  /** Đơn đã huỷ / vô hiệu — không còn nhận thanh toán theo giá đã chốt */
+  isClosed: boolean;
   status: number | null;
   endDate: Date | null;
 };
@@ -237,13 +318,16 @@ export async function getOrderByCouponCode(couponCode: string): Promise<CouponOr
     .query<ExistingOrderRow>(`
       SELECT TOP (1)
         so.OrderID,
-        pkg.Amount,
+        pkg.Amount - ISNULL(vu.DiscountAmount, 0) AS Amount,
+        pkg.Amount AS ListAmount,
         so.UpgradeAmount,
+        vu.DiscountAmount AS VoucherDiscount,
         so.Status,
         so.IsPaid,
         so.EndDate
       FROM [EStocks_Data].[dbo].[service_Orders] so
       LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = so.PackageID
+      LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = so.OrderID
       WHERE so.CouponCode = @CouponCode
       ORDER BY
         CASE WHEN so.Status IN (${ORDER_STATUS_APPROVED}, ${ORDER_STATUS_UPGRADE}) OR so.IsPaid = 1 THEN 0 ELSE 1 END,
@@ -254,14 +338,19 @@ export async function getOrderByCouponCode(couponCode: string): Promise<CouponOr
   const row = result.recordset[0];
   if (!row?.OrderID) return null;
 
+  const isPaid =
+    row.Status === ORDER_STATUS_APPROVED ||
+    row.Status === ORDER_STATUS_UPGRADE ||
+    row.IsPaid === true;
+
   return {
     orderId: row.OrderID,
     amount: row.UpgradeAmount ?? row.Amount ?? 0,
-    isPaid:
-      row.Status === ORDER_STATUS_APPROVED ||
-      row.Status === ORDER_STATUS_UPGRADE ||
-      row.IsPaid === true,
+    listAmount: row.ListAmount ?? 0,
+    voucherDiscount: row.VoucherDiscount,
+    isPaid,
     isUpgrade: row.UpgradeAmount !== null,
+    isClosed: !isPaid && (row.Status === ORDER_STATUS_CANCELLED || row.Status === ORDER_STATUS_INVALID),
     status: row.Status,
     endDate: row.EndDate,
   };

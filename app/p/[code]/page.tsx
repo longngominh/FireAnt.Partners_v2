@@ -1,10 +1,15 @@
 import { redirect } from "next/navigation";
-import { getCouponByShortCode } from "@/lib/data/payment";
+import { getCouponByShortCode, type Coupon } from "@/lib/data/payment";
 import { estimateUpgradeEndDate } from "@/lib/data/membership";
 import { getOrCreatePartnerPaymentOrder, getOrderByCouponCode } from "@/lib/payment/order-payment";
 import { parseUpgradeLink } from "@/lib/payment/upgrade-link";
+import { parseVoucherPaymentLink, type VoucherLinkParams } from "@/lib/payment/voucher-link";
 import { buildTransferContent } from "@/lib/payment/vietqr";
 import { PublicNotice } from "@/components/features/public/public-notice";
+import {
+  PurchasePaymentView,
+  type PurchasePaymentViewModel,
+} from "@/components/features/public/purchase-payment-view";
 import {
   UpgradePaymentView,
   type UpgradePaymentViewModel,
@@ -63,6 +68,12 @@ export default async function ShortLinkPage({
   }
 
   const upgrade = parseUpgradeLink(coupon.paymentLink);
+
+  // ---- Coupon mua gói có mã khuyến mại: QR của đơn đã trừ mã (không qua checkout Corporate) ----
+  const voucherLink = upgrade ? null : parseVoucherPaymentLink(coupon.paymentLink);
+  if (voucherLink) {
+    return <PurchasePaymentView view={await buildVoucherPurchaseView(coupon, voucherLink)} />;
+  }
 
   // ---- Coupon mua gói thường: redirect sang checkout Corporate như trước ----
   if (!upgrade) {
@@ -151,4 +162,62 @@ export default async function ShortLinkPage({
   };
 
   return <UpgradePaymentView view={view} />;
+}
+
+/**
+ * Đơn của link có mã khuyến mại luôn được tạo cùng coupon (lib/payment/actions.ts) với giá đã
+ * trừ mã; trang chỉ đọc lại đơn đó. Đơn đã bị huỷ (khách tự mua lại cùng gói trên fireant.vn,
+ * quá hạn chuyển khoản…) thì lượt mã đã được trả lại — không phát QR nữa.
+ */
+async function buildVoucherPurchaseView(
+  coupon: Coupon,
+  link: VoucherLinkParams,
+): Promise<PurchasePaymentViewModel> {
+  const order = await getOrderByCouponCode(coupon.code);
+  const paid = order?.isPaid ?? false;
+  const expired = !paid && isExpired(coupon.expiresAt);
+  const cancelled = !paid && (order?.isClosed ?? false);
+
+  let accountNumber = "";
+  let qrCodeUrl = "";
+  let qrPending = false;
+  let isMock = false;
+  let unavailable = !order;
+
+  if (order && !paid && !expired && !cancelled) {
+    try {
+      const qr = await getOrCreatePartnerPaymentOrder({
+        couponCode: coupon.code,
+        paymentLink: coupon.paymentLink,
+        note: coupon.note,
+        staff: "public-link",
+      });
+      accountNumber = qr.accountNumber;
+      qrCodeUrl = qr.qrCodeUrl;
+      qrPending = qr.qrPending;
+      isMock = qr.isMock;
+    } catch (err) {
+      console.error(`[p/${coupon.code}] không tạo được QR cho link có mã khuyến mại`, err);
+      unavailable = true;
+    }
+  }
+
+  return {
+    code: coupon.code,
+    state: paid ? "paid" : expired ? "expired" : cancelled ? "cancelled" : unavailable ? "unavailable" : "pending",
+    amount: order?.amount ?? coupon.orderAmount,
+    listAmount: order?.listAmount ?? null,
+    voucherCode: link.voucherCode,
+    discountAmount: order?.voucherDiscount ?? coupon.discountAmount,
+    orderId: order?.orderId ?? null,
+    accountNumber,
+    transferContent: order ? buildTransferContent(order.orderId) : "",
+    qrCodeUrl,
+    qrPending,
+    isMock,
+    userName: link.userName,
+    packageName: coupon.packageName,
+    paidEndDate: paid ? order?.endDate?.toISOString() ?? null : null,
+    expiresAt: coupon.expiresAt.toISOString(),
+  };
 }

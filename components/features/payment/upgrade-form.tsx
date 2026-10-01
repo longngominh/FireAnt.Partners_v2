@@ -14,6 +14,7 @@ import { createPaymentInitialState, type CreatePaymentResult, type CreatePayment
 import { durationLabel, tierMeta } from "@/lib/payment/tiers";
 import type { UpgradeOption, UpgradeQuote, UpgradeTier } from "@/lib/data/membership";
 import { cn } from "@/lib/utils";
+import { normalizeSource } from "@/lib/payment/source";
 import {
   Callout,
   ChoiceCard,
@@ -24,11 +25,13 @@ import {
   SummaryRow,
   TierBadge,
 } from "./form-bits";
+import { SourceField } from "./source-field";
 
 type Props = {
   partnerId: string | null;
   onCreated: (result: CreatePaymentResult) => void;
   onSuggestPurchase: () => void;
+  sourceSuggestions: string[];
 };
 
 function fmtDate(iso: string | null | undefined): string {
@@ -43,7 +46,7 @@ function pickDefaultOption(tier: UpgradeTier | undefined): string | null {
   return tier.options.find((o) => o.available)?.key ?? null;
 }
 
-export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase }: Props) {
+export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSuggestions }: Props) {
   const [state, action, pending] = useActionState<CreatePaymentState, FormData>(
     createUpgradePaymentAction,
     createPaymentInitialState,
@@ -57,6 +60,8 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase }: Props) 
   const [tierId, setTierId] = useState<number | null>(null);
   const [optionKey, setOptionKey] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [source, setSource] = useState("");
+  const sourceLabel = normalizeSource(source);
 
   const eligible = quote?.eligible ? quote : null;
   const tier = eligible?.tiers.find((t) => t.serviceId === tierId) ?? eligible?.tiers[0] ?? null;
@@ -295,19 +300,28 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase }: Props) 
               <p className="text-xs text-destructive">{state.fieldErrors.option[0]}</p>
             ) : null}
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="upgradeNote">
-                Ghi chú <span className="text-xs font-normal text-muted-foreground">(tuỳ chọn, nội bộ)</span>
-              </Label>
-              <Input
-                id="upgradeNote"
-                name="note"
-                placeholder="VD: Khách yêu cầu nâng cấp qua Zalo…"
-                maxLength={500}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                className="h-9"
+            <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+              <SourceField
+                id="upgradeSource"
+                value={source}
+                onChange={setSource}
+                suggestions={sourceSuggestions}
+                error={state.fieldErrors?.source?.[0]}
               />
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="upgradeNote">
+                  Ghi chú <span className="text-xs font-normal text-muted-foreground">(tuỳ chọn, nội bộ)</span>
+                </Label>
+                <Input
+                  id="upgradeNote"
+                  name="note"
+                  placeholder="VD: Khách yêu cầu nâng cấp qua Zalo…"
+                  maxLength={500}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  className="h-9"
+                />
+              </div>
             </div>
           </StepCard>
         ) : null}
@@ -342,6 +356,11 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase }: Props) 
               <SummaryRow label="Khách hàng">
                 <span className="block max-w-[180px] truncate">{eligible.userName}</span>
               </SummaryRow>
+              {sourceLabel ? (
+                <SummaryRow label="Nguồn">
+                  <span className="block max-w-[180px] truncate">{sourceLabel}</span>
+                </SummaryRow>
+              ) : null}
               <SummaryRow label="Hạn mới dự kiến">
                 <span className="num">{fmtDate(option.endDate)}</span>
               </SummaryRow>

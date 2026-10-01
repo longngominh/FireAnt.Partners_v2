@@ -37,6 +37,7 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
             <TableHead>Tài khoản</TableHead>
             <TableHead className="text-right">Số tiền</TableHead>
             <TableHead>Trạng thái</TableHead>
+            <TableHead className="hidden md:table-cell">Nguồn</TableHead>
             <TableHead className="hidden md:table-cell">Ngày tạo</TableHead>
             <TableHead className="hidden lg:table-cell">Ghi chú</TableHead>
             <TableHead className="text-right">Thao tác</TableHead>
@@ -70,12 +71,32 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
                 </span>
               </TableCell>
               <TableCell className="num text-right text-sm">
-                {coupon.orderAmount > 0
-                  ? formatVND(coupon.orderAmount)
-                  : <span className="text-muted-foreground">—</span>}
+                <div className="flex flex-col items-end leading-tight">
+                  {coupon.orderAmount > 0
+                    ? formatVND(coupon.orderAmount)
+                    : <span className="text-muted-foreground">—</span>}
+                  {coupon.voucherCode ? (
+                    <span
+                      className="text-[11px] text-success"
+                      title={`Mã khuyến mại ${coupon.voucherCode}`}
+                    >
+                      <span className="font-mono font-medium">{coupon.voucherCode}</span>
+                      {coupon.discountAmount ? ` · −${formatVND(coupon.discountAmount)}` : null}
+                    </span>
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell>
                 <StatusBadge status={coupon.status} />
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                {coupon.source ? (
+                  <span className="inline-block max-w-[140px] truncate rounded-full border px-2 py-0.5 align-middle text-[11px] font-medium text-foreground">
+                    {coupon.source}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
                 {format(coupon.createdAt, "dd/MM/yyyy HH:mm", { locale: vi })}

@@ -1,6 +1,8 @@
 import { getPool, sql } from "@/lib/db/sql";
 
 export type FireAntUser = {
+  /** AspNetUsers.Id — khoá mà voucher cá nhân (service_DiscountVouchers.UserID) so khớp */
+  id: string;
   userName: string;
   email: string | null;
 };
@@ -19,8 +21,8 @@ export async function findFireAntUser(
   const res = await pool
     .request()
     .input("Value", sql.NVarChar(256), value)
-    .query<{ UserName: string; Email: string | null }>(`
-      SELECT TOP 1 UserName, Email
+    .query<{ Id: string; UserName: string; Email: string | null }>(`
+      SELECT TOP 1 Id, UserName, Email
       FROM NEWFA.FireAnt_Identity.dbo.AspNetUsers
       WHERE UserName = @Value OR Email = @Value;
     `);
@@ -28,5 +30,5 @@ export async function findFireAntUser(
   const row = res.recordset[0];
   if (!row?.UserName) return null;
 
-  return { userName: row.UserName, email: row.Email ?? null };
+  return { id: row.Id, userName: row.UserName, email: row.Email ?? null };
 }

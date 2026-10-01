@@ -11,7 +11,10 @@
 --    - Đơn nâng cấp kiểu mới (từ 09/2026): phần chênh lệch ghi thẳng vào
 --      service_Orders.UpgradeAmount (nếu sau đó nâng cấp tiếp thì có thêm dòng
 --      service_Upgrades, cũng cộng dồn).
---    - Đơn thường: lấy giá gói service_Packages.Amount.
+--    - Đơn thường: lấy giá gói service_Packages.Amount, TRỪ khoản giảm của mã khuyến
+--      mại nếu có (service_DiscountVoucherUsages, tối đa 1 dòng/đơn — UNIQUE OrderID).
+--      Đúng công thức service_GetOrderWithUserInfo mà webhook OnePay dùng để đối chiếu
+--      số tiền khách chuyển. Voucher tặng ngày ghi DiscountAmount = 0 nên không đổi.
 --    ListAmount giữ giá niêm yết để đối chiếu khi cần.
 --
 -- Mọi stored procedure tính doanh thu/hoa hồng phải đi qua view này để dashboard,
@@ -33,10 +36,11 @@ SELECT
   CASE
     WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
       THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-    ELSE ISNULL(pkg.Amount, 0)
+    ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
   END AS Amount
 FROM  [EStocks_Data].[dbo].[service_Orders]   o
 LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+LEFT  JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
 OUTER APPLY (
   SELECT SUM(up.Amount) AS Amount
   FROM [EStocks_Data].[dbo].[service_Upgrades] up

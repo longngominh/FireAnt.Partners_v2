@@ -22,7 +22,10 @@ GO
 --    - Đơn nâng cấp kiểu mới (từ 09/2026): phần chênh lệch ghi thẳng vào
 --      service_Orders.UpgradeAmount (nếu sau đó nâng cấp tiếp thì có thêm dòng
 --      service_Upgrades, cũng cộng dồn).
---    - Đơn thường: lấy giá gói service_Packages.Amount.
+--    - Đơn thường: lấy giá gói service_Packages.Amount, TRỪ khoản giảm của mã khuyến
+--      mại nếu có (service_DiscountVoucherUsages, tối đa 1 dòng/đơn — UNIQUE OrderID).
+--      Đúng công thức service_GetOrderWithUserInfo mà webhook OnePay dùng để đối chiếu
+--      số tiền khách chuyển. Voucher tặng ngày ghi DiscountAmount = 0 nên không đổi.
 --    ListAmount giữ giá niêm yết để đối chiếu khi cần.
 --
 -- Mọi stored procedure tính doanh thu/hoa hồng phải đi qua view này để dashboard,
@@ -44,10 +47,11 @@ SELECT
   CASE
     WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
       THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-    ELSE ISNULL(pkg.Amount, 0)
+    ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
   END AS Amount
 FROM  [EStocks_Data].[dbo].[service_Orders]   o
 LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
+LEFT  JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
 OUTER APPLY (
   SELECT SUM(up.Amount) AS Amount
   FROM [EStocks_Data].[dbo].[service_Upgrades] up
@@ -60,12 +64,11 @@ WHERE o.IsPaid = 1;
 -- usp_CountCoupons
 -- ---------------------------------------------------------------------------
 GO
-
-GO
 CREATE OR ALTER PROCEDURE usp_CountCoupons
   @PartnerId INT           = NULL,
   @Status    NVARCHAR(20)  = 'ALL',
-  @Q         NVARCHAR(200) = NULL    -- truyền dạng '%keyword%' từ app
+  @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
+  @Source    NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -87,6 +90,11 @@ BEGIN
   FROM  Coupons cp
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
     AND (
+      @Source IS NULL
+      OR (@Source = N'' AND cp.Source IS NULL)
+      OR cp.Source = @Source
+    )
+    AND (
       @Status = 'ALL'
       OR (@Status = 'PAID'    AND cp.IsUsed = 1)
       OR (@Status = 'USED'    AND cp.IsUsed = 0 AND EXISTS (
@@ -101,11 +109,11 @@ BEGIN
       @Q IS NULL
       OR cp.CouponCode LIKE @Q
       OR ISNULL(cp.UserName,'') LIKE @Q
+      OR ISNULL(cp.Source, '') LIKE @Q
+      OR ISNULL(cp.VoucherCode, '') LIKE @Q
       OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
     );
 END;
-
-
 
 
 -- ---------------------------------------------------------------------------
@@ -232,20 +240,25 @@ END;
 -- ---------------------------------------------------------------------------
 GO
 CREATE OR ALTER PROCEDURE usp_CreateCoupon
-  @PartnerId   INT,
-  @CouponCode  NVARCHAR(50),
-  @PaymentLink NVARCHAR(MAX),
-  @PackageId   INT = NULL,
-  @UserName    NVARCHAR(256) = NULL,
-  @Note        NVARCHAR(MAX) = NULL
+  @PartnerId      INT,
+  @CouponCode     NVARCHAR(50),
+  @PaymentLink    NVARCHAR(MAX),
+  @PackageId      INT = NULL,
+  @UserName       NVARCHAR(256) = NULL,
+  @Note           NVARCHAR(MAX) = NULL,
+  @Source         NVARCHAR(50) = NULL,     -- nguồn khách (Zalo, TikTok, Team 1…)
+  @VoucherCode    NVARCHAR(20) = NULL,     -- mã khuyến mại đã áp vào đơn của link
+  @DiscountAmount DECIMAL(18, 2) = NULL    -- số tiền đã giảm (0 với voucher tặng ngày)
 AS
 BEGIN
   SET NOCOUNT ON;
 
   INSERT INTO Coupons
-    (PartnerId, CouponTypeId, CouponCode, IsUsed, CreatedDate, ExpireDate, PaymentLink, PackageId, UserName, Note)
+    (PartnerId, CouponTypeId, CouponCode, IsUsed, CreatedDate, ExpireDate, PaymentLink, PackageId, UserName, Note,
+     Source, VoucherCode, DiscountAmount)
   VALUES
-    (@PartnerId, 1, @CouponCode, 0, GETDATE(), DATEADD(day, 14, GETDATE()), @PaymentLink, @PackageId, @UserName, @Note);
+    (@PartnerId, 1, @CouponCode, 0, GETDATE(), DATEADD(day, 14, GETDATE()), @PaymentLink, @PackageId, @UserName, @Note,
+     @Source, @VoucherCode, @DiscountAmount);
 
   SELECT SCOPE_IDENTITY() AS CouponID;
 END;
@@ -279,8 +292,9 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
-    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn (vw_PaidOrders đã trừ voucher); chưa thanh
+    -- toán: giá gói trong link trừ khoản giảm của mã khuyến mại lúc tạo link.
+    COALESCE(o.Amount, pkg.Amount - ISNULL(cp.DiscountAmount, 0), 0)     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -294,7 +308,10 @@ BEGIN
     )                                                                     AS CustomerName,
     pkg.PackageName,
     cp.UserName,
-    cp.Note
+    cp.Note,
+    cp.Source,
+    cp.VoucherCode,
+    cp.DiscountAmount
   FROM  Coupons cp
   LEFT  JOIN vw_PaidOrders o ON o.OrderID = @OrderID
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = COALESCE(
@@ -308,7 +325,6 @@ BEGIN
   )
   WHERE cp.CouponCode = @CouponCode;
 END;
-
 
 
 -- ---------------------------------------------------------------------------
@@ -380,7 +396,8 @@ AS
 BEGIN
   SET NOCOUNT ON;
 
-  SELECT ISNULL(SUM(pkg.Amount), 0) AS PendingRevenue
+  -- Giá gói trong link trừ khoản giảm của mã khuyến mại (Coupons.DiscountAmount) nếu có.
+  SELECT ISNULL(SUM(pkg.Amount - ISNULL(cp.DiscountAmount, 0)), 0) AS PendingRevenue
   FROM  Coupons cp
   LEFT  JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = TRY_CAST(SUBSTRING(
       cp.PaymentLink,
@@ -689,7 +706,8 @@ CREATE OR ALTER PROCEDURE usp_ListCoupons
   @Status    NVARCHAR(20)  = 'ALL',
   @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
   @Offset    INT           = 0,
-  @PageSize  INT           = 20
+  @PageSize  INT           = 20,
+  @Source    NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -723,9 +741,17 @@ BEGIN
       cp.CreatedDate,
       cp.ExpireDate,
       cp.UserName,
-      cp.Note
+      cp.Note,
+      cp.Source,
+      cp.VoucherCode,
+      cp.DiscountAmount
     FROM Coupons cp
     WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (
+        @Source IS NULL
+        OR (@Source = N'' AND cp.Source IS NULL)
+        OR cp.Source = @Source
+      )
       AND (
         @Status = 'ALL'
         OR (@Status = 'PAID'    AND cp.IsUsed = 1)
@@ -741,6 +767,8 @@ BEGIN
         @Q IS NULL
         OR cp.CouponCode LIKE @Q
         OR ISNULL(cp.UserName, '') LIKE @Q
+        OR ISNULL(cp.Source, '') LIKE @Q
+        OR ISNULL(cp.VoucherCode, '') LIKE @Q
         OR cp.PaymentLink LIKE @Q
         OR cp.CouponCode IN (SELECT m.CouponCode FROM PaidUserMatch m)
       )
@@ -757,8 +785,9 @@ BEGIN
     cp.ExpireDate,
     o.OrderID                                                             AS OrderId,
     o.OrderDate,
-    -- Đã thanh toán: số thực thu của đơn; chưa thanh toán: giá gói trong link.
-    COALESCE(o.Amount, pkg.Amount, 0)                                     AS OrderAmount,
+    -- Đã thanh toán: số thực thu của đơn (vw_PaidOrders đã trừ voucher); chưa thanh
+    -- toán: giá gói trong link trừ khoản giảm của mã khuyến mại lúc tạo link.
+    COALESCE(o.Amount, pkg.Amount - ISNULL(cp.DiscountAmount, 0), 0)     AS OrderAmount,
     COALESCE(
       o.UserName,
       CASE WHEN CHARINDEX('userName=', cp.PaymentLink) > 0 THEN
@@ -772,7 +801,10 @@ BEGIN
     )                                                                     AS CustomerName,
     pkg.PackageName,
     cp.UserName,
-    cp.Note
+    cp.Note,
+    cp.Source,
+    cp.VoucherCode,
+    cp.DiscountAmount
   FROM  PagedCoupons cp
   LEFT  JOIN PaidByCoupon pbc ON pbc.CouponCode = cp.CouponCode
   LEFT  JOIN vw_PaidOrders o  ON o.OrderID      = pbc.OrderID
@@ -789,6 +821,33 @@ BEGIN
 END;
 
 
+-- ---------------------------------------------------------------------------
+-- usp_ListCouponSources
+-- ---------------------------------------------------------------------------
+GO
+-- =============================================================================
+-- usp_ListCouponSources — các nguồn khách (Coupons.Source) đối tác đã dùng.
+--
+-- Dùng cho gợi ý ở /payment/create và ô lọc "Nguồn" ở /payment, /customers.
+-- Mới dùng gần nhất xếp trước. Coupons chỉ vài nghìn dòng nên quét thẳng là đủ nhanh.
+-- Collation không phân biệt hoa/thường nên "zalo" và "Zalo" gộp làm một.
+-- =============================================================================
+CREATE OR ALTER PROCEDURE usp_ListCouponSources
+  @PartnerId INT = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;
+
+  SELECT TOP (50)
+    cp.Source,
+    COUNT(*)            AS LinkCount,
+    MAX(cp.CreatedDate) AS LastUsedAt
+  FROM  Coupons cp
+  WHERE cp.Source IS NOT NULL
+    AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+  GROUP BY cp.Source
+  ORDER BY MAX(cp.CreatedDate) DESC;
+END;
 
 
 -- ---------------------------------------------------------------------------
@@ -816,6 +875,9 @@ GO
 -- @Total OUTPUT trả tổng số dòng để trang không phải gọi usp_CountCustomers (tránh dựng
 -- lại toàn bộ tập ứng viên lần thứ hai).
 --
+-- NGUỒN KHÁCH (10/2026): Source = nguồn CTV gắn trên link của đơn SỚM NHẤT có gắn nguồn —
+-- kênh đã đưa khách về. @Source lọc theo cột này (N'' = khách chưa gắn nguồn).
+--
 -- GIỮ NGUYÊN HÀNH VI: vẫn một dòng cho mỗi (khách × đối tác) như bản cũ (bản cũ gom theo
 -- pu.Name, bản này gom theo cp.PartnerId — chỉ khác khi hai đối tác trùng tên).
 -- vw_PaidOrders: IsPaid = 1, Amount = doanh thu thực thu (xem db/views/vw_PaidOrders.sql).
@@ -825,13 +887,14 @@ CREATE OR ALTER PROCEDURE usp_ListCustomers
   @Q          NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
   @Offset     INT           = 0,
   @PageSize   INT           = 20,
-  @Total      INT           = NULL OUTPUT
+  @Total      INT           = NULL OUTPUT,
+  @Source     NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = khách chưa gắn nguồn
 AS
 BEGIN
   SET NOCOUNT ON;
 
-  -- 1. Đơn đã thanh toán mới nhất của mỗi coupon đã dùng
-  CREATE TABLE #co (OrderID INT PRIMARY KEY, PartnerId INT);
+  -- 1. Đơn đã thanh toán mới nhất của mỗi coupon đã dùng (kèm nguồn gắn trên link)
+  CREATE TABLE #co (OrderID INT PRIMARY KEY, PartnerId INT, Source NVARCHAR(50) NULL);
 
   WITH PaidByCoupon AS (
     SELECT o.CouponCode, MAX(o.OrderID) AS OrderID
@@ -839,23 +902,38 @@ BEGIN
     WHERE o.IsPaid = 1 AND o.CouponCode IS NOT NULL
     GROUP BY o.CouponCode
   )
-  INSERT INTO #co (OrderID, PartnerId)
-  SELECT p.OrderID, cp.PartnerId
+  INSERT INTO #co (OrderID, PartnerId, Source)
+  SELECT p.OrderID, cp.PartnerId, cp.Source
   FROM  Coupons cp
   INNER JOIN PaidByCoupon p ON p.CouponCode = cp.CouponCode
   WHERE cp.IsUsed = 1
     AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId);
 
-  -- 2. Gộp theo khách
-  SELECT o.UserName, c.PartnerId,
-         SUM(o.Amount)    AS TotalSpent,
-         COUNT(*)         AS OrderCount,
-         MIN(o.OrderDate) AS FirstOrderAt,
-         MAX(o.OrderDate) AS LastOrderAt
-  INTO   #agg
+  -- 2. Gộp theo khách. SourceRank = 1 ở đơn sớm nhất CÓ gắn nguồn (link cũ chưa có cột
+  --    Source, hoặc CTV bỏ trống, xếp sau) → nguồn đã đưa khách về.
+  SELECT o.UserName, c.PartnerId, o.Amount, o.OrderDate, c.Source,
+         ROW_NUMBER() OVER (
+           PARTITION BY o.UserName, c.PartnerId
+           ORDER BY CASE WHEN c.Source IS NULL THEN 1 ELSE 0 END, o.OrderDate, o.OrderID
+         ) AS SourceRank
+  INTO   #ord
   FROM   #co c
-  INNER JOIN vw_PaidOrders o ON o.OrderID = c.OrderID
-  GROUP BY o.UserName, c.PartnerId;
+  INNER JOIN vw_PaidOrders o ON o.OrderID = c.OrderID;
+
+  SELECT UserName, PartnerId,
+         SUM(Amount)    AS TotalSpent,
+         COUNT(*)       AS OrderCount,
+         MIN(OrderDate) AS FirstOrderAt,
+         MAX(OrderDate) AS LastOrderAt,
+         MAX(CASE WHEN SourceRank = 1 THEN Source END) AS Source
+  INTO   #agg
+  FROM   #ord
+  GROUP BY UserName, PartnerId;
+
+  DROP TABLE #ord;
+
+  IF (@Source IS NOT NULL)
+    DELETE FROM #agg WHERE ISNULL(Source, N'') <> @Source;
 
   CREATE TABLE #page (
     UserName     NVARCHAR(256),
@@ -864,6 +942,7 @@ BEGIN
     OrderCount   INT,
     FirstOrderAt DATETIME,
     LastOrderAt  DATETIME,
+    Source       NVARCHAR(50)  NULL,
     Email        NVARCHAR(256) NULL,
     PhoneNumber  NVARCHAR(50)  NULL
   );
@@ -873,8 +952,8 @@ BEGIN
     -- 3a. Không tìm kiếm: phân trang cục bộ, chỉ hỏi linked server cho đúng 1 trang
     SELECT @Total = COUNT(*) FROM #agg;
 
-    INSERT INTO #page (UserName, PartnerId, TotalSpent, OrderCount, FirstOrderAt, LastOrderAt)
-    SELECT a.UserName, a.PartnerId, a.TotalSpent, a.OrderCount, a.FirstOrderAt, a.LastOrderAt
+    INSERT INTO #page (UserName, PartnerId, TotalSpent, OrderCount, FirstOrderAt, LastOrderAt, Source)
+    SELECT a.UserName, a.PartnerId, a.TotalSpent, a.OrderCount, a.FirstOrderAt, a.LastOrderAt, a.Source
     FROM   #agg a
     ORDER  BY a.LastOrderAt DESC
     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
@@ -902,7 +981,7 @@ BEGIN
     FROM   #uall u
     INNER REMOTE JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers a ON a.UserName = u.UserName;
 
-    SELECT a.UserName, a.PartnerId, a.TotalSpent, a.OrderCount, a.FirstOrderAt, a.LastOrderAt,
+    SELECT a.UserName, a.PartnerId, a.TotalSpent, a.OrderCount, a.FirstOrderAt, a.LastOrderAt, a.Source,
            i.Email, i.PhoneNumber
     INTO   #match
     FROM   #agg a
@@ -913,8 +992,8 @@ BEGIN
 
     SELECT @Total = COUNT(*) FROM #match;
 
-    INSERT INTO #page (UserName, PartnerId, TotalSpent, OrderCount, FirstOrderAt, LastOrderAt, Email, PhoneNumber)
-    SELECT m.UserName, m.PartnerId, m.TotalSpent, m.OrderCount, m.FirstOrderAt, m.LastOrderAt, m.Email, m.PhoneNumber
+    INSERT INTO #page (UserName, PartnerId, TotalSpent, OrderCount, FirstOrderAt, LastOrderAt, Source, Email, PhoneNumber)
+    SELECT m.UserName, m.PartnerId, m.TotalSpent, m.OrderCount, m.FirstOrderAt, m.LastOrderAt, m.Source, m.Email, m.PhoneNumber
     FROM   #match m
     ORDER  BY m.LastOrderAt DESC
     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
@@ -933,6 +1012,7 @@ BEGIN
     pg.OrderCount,
     pg.FirstOrderAt,
     pg.LastOrderAt,
+    pg.Source,
     m.MemberStartDate,
     m.MemberEndDate,
     m.LatestPackage,
@@ -1169,5 +1249,5 @@ END;
 
 GO
 -- =============================================================================
--- Hoàn tất. Tổng cộng 20 stored procedures + 1 view + 1 view đã được tạo/cập nhật.
+-- Hoàn tất. Tổng cộng 22 stored procedures + 1 view đã được tạo/cập nhật.
 -- =============================================================================

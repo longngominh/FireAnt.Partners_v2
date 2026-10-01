@@ -9,8 +9,9 @@ const POLL_TIMEOUT_MS = 20 * 60_000;
 /**
  * Poll trạng thái đơn nâng cấp; khi webhook OnePay đã xử lý xong thì refresh trang
  * để server render màn "Nâng cấp thành công" (mirror PollOrderStatus của Upgrade.razor).
+ * Trang QR của đơn mua gói có mã khuyến mại dùng chung, chỉ đổi động từ ("kích hoạt").
  */
-export function UpgradeStatusPoller({ code }: { code: string }) {
+export function UpgradeStatusPoller({ code, verb = "nâng cấp" }: { code: string; verb?: string }) {
   const router = useRouter();
   const [timedOut, setTimedOut] = useState(false);
   const startedAt = useRef<number | null>(null);
@@ -51,7 +52,7 @@ export function UpgradeStatusPoller({ code }: { code: string }) {
   if (timedOut) {
     return (
       <p className="text-sm text-muted-foreground">
-        Chưa ghi nhận thanh toán. Nếu bạn đã chuyển tiền, gói sẽ được nâng cấp ngay khi ngân hàng báo có —{" "}
+        Chưa ghi nhận thanh toán. Nếu bạn đã chuyển tiền, gói sẽ được {verb} ngay khi ngân hàng báo có —{" "}
         <button
           type="button"
           onClick={() => {
@@ -76,7 +77,7 @@ export function UpgradeStatusPoller({ code }: { code: string }) {
       </span>
       <span className="text-sm text-muted-foreground">
         Đang chờ thanh toán — gói sẽ được{" "}
-        <strong className="font-semibold text-foreground">nâng cấp tự động</strong> ngay khi hệ thống nhận được
+        <strong className="font-semibold text-foreground">{verb} tự động</strong> ngay khi hệ thống nhận được
         tiền. Trang này tự cập nhật.
       </span>
     </div>
