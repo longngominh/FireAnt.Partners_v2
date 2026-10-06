@@ -5,6 +5,7 @@ import { getOrCreatePartnerPaymentOrder, getOrderByCouponCode } from "@/lib/paym
 import { parseUpgradeLink } from "@/lib/payment/upgrade-link";
 import { parseVoucherPaymentLink, type VoucherLinkParams } from "@/lib/payment/voucher-link";
 import { buildTransferContent } from "@/lib/payment/vietqr";
+import { orderRef } from "@/lib/payment/order-ref";
 import { PublicNotice } from "@/components/features/public/public-notice";
 import {
   PurchasePaymentView,
@@ -107,6 +108,7 @@ export default async function ShortLinkPage({
   let qrCodeUrl = "";
   let qrPending = false;
   let isMock = false;
+  let qrRef: string | null = null;
   let unavailable = !order;
 
   if (order && !paid && !expired) {
@@ -121,6 +123,7 @@ export default async function ShortLinkPage({
       qrCodeUrl = qr.qrCodeUrl;
       qrPending = qr.qrPending;
       isMock = qr.isMock;
+      qrRef = qr.orderRef;
     } catch (err) {
       console.error(`[p/${coupon.code}] không tạo được QR nâng cấp`, err);
       unavailable = true;
@@ -142,13 +145,18 @@ export default async function ShortLinkPage({
     console.warn(`[p/${coupon.code}] không ước tính được hạn mới`, err);
   }
 
+  // QR vừa dựng thì dùng đúng tham chiếu của tài khoản định danh; đơn đã trả / hết hạn thì dựng
+  // lại từ mã dịch vụ của gói (lib/payment/order-ref.ts).
+  const shownRef = qrRef ?? (order ? orderRef(order.serviceCode, order.orderId) : null);
+
   const view: UpgradePaymentViewModel = {
     code: coupon.code,
     state: paid ? "paid" : expired ? "expired" : unavailable ? "unavailable" : "pending",
     amount: order?.amount ?? upgrade.amount,
     orderId: order?.orderId ?? null,
+    orderRef: shownRef,
     accountNumber,
-    transferContent: order ? buildTransferContent(order.orderId) : "",
+    transferContent: shownRef ? buildTransferContent(shownRef) : "",
     qrCodeUrl,
     qrPending,
     isMock,
@@ -182,6 +190,7 @@ async function buildVoucherPurchaseView(
   let qrCodeUrl = "";
   let qrPending = false;
   let isMock = false;
+  let qrRef: string | null = null;
   let unavailable = !order;
 
   if (order && !paid && !expired && !cancelled) {
@@ -196,11 +205,14 @@ async function buildVoucherPurchaseView(
       qrCodeUrl = qr.qrCodeUrl;
       qrPending = qr.qrPending;
       isMock = qr.isMock;
+      qrRef = qr.orderRef;
     } catch (err) {
       console.error(`[p/${coupon.code}] không tạo được QR cho link có mã khuyến mại`, err);
       unavailable = true;
     }
   }
+
+  const shownRef = qrRef ?? (order ? orderRef(order.serviceCode, order.orderId) : null);
 
   return {
     code: coupon.code,
@@ -210,8 +222,9 @@ async function buildVoucherPurchaseView(
     voucherCode: link.voucherCode,
     discountAmount: order?.voucherDiscount ?? coupon.discountAmount,
     orderId: order?.orderId ?? null,
+    orderRef: shownRef,
     accountNumber,
-    transferContent: order ? buildTransferContent(order.orderId) : "",
+    transferContent: shownRef ? buildTransferContent(shownRef) : "",
     qrCodeUrl,
     qrPending,
     isMock,

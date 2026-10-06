@@ -21,6 +21,8 @@ import type { Coupon } from "@/lib/data/payment";
 
 type PaymentQrResult = {
   orderId: number;
+  /** "ED15387365" (khóa học) / "FA15387365" — trùng nội dung chuyển khoản */
+  orderRef?: string;
   qrCodeUrl: string;
   accountNumber: string;
   qrPending: boolean;
@@ -195,7 +197,7 @@ export function CouponRowActions({
               )}
             </div>
             {paymentQr?.orderId && paymentQr.orderId > 0 ? (
-              <code className="rounded bg-muted px-2 py-1 text-xs">FA{paymentQr.orderId}</code>
+              <code className="rounded bg-muted px-2 py-1 text-xs">{paymentQr.orderRef ?? `FA${paymentQr.orderId}`}</code>
             ) : null}
           </div>
 

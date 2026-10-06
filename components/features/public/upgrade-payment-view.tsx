@@ -13,6 +13,8 @@ export type UpgradePaymentViewModel = {
   state: "pending" | "paid" | "expired" | "unavailable";
   amount: number;
   orderId: number | null;
+  /** "ED15387365" (khóa học) / "FA15387365" — trùng nội dung chuyển khoản */
+  orderRef: string | null;
   accountNumber: string;
   transferContent: string;
   qrCodeUrl: string;
@@ -80,7 +82,7 @@ export function UpgradePaymentView({ view }: { view: UpgradePaymentViewModel }) 
             </Row>
             {view.orderId ? (
               <Row label="Mã đơn hàng">
-                <span className="num font-medium">FA{view.orderId}</span>
+                <span className="num font-medium">{view.orderRef ?? `FA${view.orderId}`}</span>
               </Row>
             ) : null}
           </dl>
@@ -154,7 +156,7 @@ export function UpgradePaymentView({ view }: { view: UpgradePaymentViewModel }) 
           </div>
           <div className="text-right text-sm">
             <div className="text-xs text-muted-foreground">Mã đơn hàng</div>
-            <div className="num font-semibold">{view.orderId ? `FA${view.orderId}` : "—"}</div>
+            <div className="num font-semibold">{view.orderId ? view.orderRef ?? `FA${view.orderId}` : "—"}</div>
             <div className="mt-1 max-w-[220px] text-xs text-muted-foreground">{modeLabel}</div>
           </div>
         </div>

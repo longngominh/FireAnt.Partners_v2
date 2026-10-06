@@ -80,6 +80,8 @@ export type CreatePaymentResult = {
   publicLink: string;
   qrCodeUrl: string;
   orderId: number | null;
+  /** Mã đơn hiển thị cạnh QR — "ED15387365" (khóa học) / "FA15387365", trùng nội dung chuyển khoản */
+  orderRef: string | null;
   accountNumber: string;
   transferContent: string | null;
   qrPending: boolean;

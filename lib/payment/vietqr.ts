@@ -27,6 +27,7 @@ export function buildVietQRUrl(params: VietQRParams): string {
   return `${VIETQR_HOST}/image/${bankCode}-${accountNumber}-${template}.jpg?${query.toString()}`;
 }
 
-export function buildTransferContent(orderId: number): string {
-  return `Thanh toan don hang FA${orderId}`;
+/** @param orderRef tham chiếu của đơn — "ED15387365" / "FA15387365", xem lib/payment/order-ref.ts */
+export function buildTransferContent(orderRef: string): string {
+  return `Thanh toan don hang ${orderRef}`;
 }

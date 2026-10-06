@@ -1,6 +1,7 @@
 import { getPool, sql } from "@/lib/db/sql";
 import { buildTransferContent, buildVietQRUrl } from "./vietqr";
-import { getOnePayClient, isOnePayMock } from "./onepay-client";
+import { getOnePayClient, isOnePayMock, type OnePayAccount } from "./onepay-client";
+import { legacyOrderRef, orderRef } from "./order-ref";
 import { isUpgradePaymentLink } from "./upgrade-link";
 import { isVoucherPaymentLink } from "./voucher-link";
 import { applyVoucherToOrder, cancelPendingPartnerOrder } from "./voucher";
@@ -35,6 +36,8 @@ export type PartnerPaymentOrderInput = {
 
 export type PartnerPaymentOrderResult = {
   orderId: number;
+  /** Tham chiếu của đơn trên OnePay + nội dung chuyển khoản: "ED15387365" (khóa học) / "FA15387365" */
+  orderRef: string;
   /** Số tiền trên QR — đã trừ mã khuyến mại nếu có */
   amount: number;
   qrCodeUrl: string;
@@ -78,7 +81,7 @@ export async function createPartnerPaymentOrder(
   });
 
   if (!input.voucher) {
-    return buildPaymentOrderResult(orderId, input.amount);
+    return buildPaymentOrderResult(orderId, input.amount, { isNew: true });
   }
 
   // Mã khuyến mại ghi theo OrderID nên chỉ áp được SAU khi có đơn (giống Pay.razor). Áp
@@ -107,7 +110,7 @@ export async function createPartnerPaymentOrder(
     throw new VoucherApplyError(VOUCHER_FULL_DISCOUNT_MESSAGE);
   }
 
-  const result = await buildPaymentOrderResult(orderId, applied.netAmount);
+  const result = await buildPaymentOrderResult(orderId, applied.netAmount, { isNew: true });
   return { ...result, voucher: { discountAmount: applied.discountAmount, benefit: applied.benefit } };
 }
 
@@ -116,7 +119,7 @@ export async function cancelPartnerOrderQuietly(orderId: number, reason: string)
   try {
     await cancelPendingPartnerOrder(orderId, reason);
   } catch (err) {
-    console.error(`[partner-payment] Không huỷ được đơn FA${orderId} (${reason}):`, err);
+    console.error(`[partner-payment] Không huỷ được đơn ${orderId} (${reason}):`, err);
   }
 }
 
@@ -127,7 +130,8 @@ export async function cancelPartnerOrderQuietly(orderId: number, reason: string)
  *   2. service_PrepareUpgradeOrder gán UpgradeAmount + UpgradeFromPackageID để webhook
  *      OnePay (company.fireant.vn) nhận diện đơn nâng cấp và gọi service_ProcessUpgradeOrder.
  *   3. Đọc lại UpgradeAmount để chắc chắn số tiền trên QR khớp với số DB sẽ đối chiếu.
- *   4. Tạo tài khoản định danh OnePay FA{orderId} + VietQR với số tiền nâng cấp.
+ *   4. Tạo tài khoản định danh OnePay {ServiceCode}{orderId} (gói hội viên → luôn FA) + VietQR
+ *      với số tiền nâng cấp.
  */
 export async function createPartnerUpgradeOrder(
   input: PartnerUpgradeOrderInput,
@@ -199,7 +203,7 @@ export async function createPartnerUpgradeOrder(
     throw new Error("Không chuẩn bị được đơn nâng cấp. Vui lòng thử lại.");
   }
 
-  return buildPaymentOrderResult(orderId, input.amount);
+  return buildPaymentOrderResult(orderId, input.amount, { isNew: true });
 }
 
 export async function getOrCreatePartnerPaymentOrder(params: {
@@ -220,7 +224,7 @@ export async function getOrCreatePartnerPaymentOrder(params: {
       throw new Error("Đơn của link này đã bị huỷ nên mã khuyến mại không còn giữ. Vui lòng tạo link mới.");
     }
 
-    return buildPaymentOrderResult(existing.orderId, existing.amount);
+    return buildPaymentOrderResult(existing.orderId, existing.amount, { isNew: false });
   }
 
   if (isUpgradePaymentLink(params.paymentLink)) {
@@ -245,43 +249,81 @@ export async function getOrCreatePartnerPaymentOrder(params: {
   });
 }
 
+/**
+ * Cấp (hoặc đọc lại) tài khoản định danh OnePay của đơn + dựng VietQR.
+ *
+ * Tham chiếu theo mã dịch vụ của gói: khóa học "ED{id}", hội viên "FA{id}" — xem
+ * lib/payment/order-ref.ts. Đơn có sẵn (isNew = false) của khóa học tạo TRƯỚC khi đổi quy ước
+ * đã được cấp tài khoản "FA{id}" và khách có thể đã lưu / đã chuyển vào số đó: đọc lại đúng tài
+ * khoản ấy thay vì cấp thêm một số "ED{id}" khác cho cùng đơn.
+ */
 async function buildPaymentOrderResult(
   orderId: number,
   amount: number,
+  options: { isNew: boolean },
 ): Promise<PartnerPaymentOrderResult> {
   let accountNumber = "";
   let qrCodeUrl = "";
   let qrPending = false;
-  const transferContent = buildTransferContent(orderId);
+
+  const ref = orderRef(await getOrderServiceCode(orderId), orderId);
+  let usedRef = ref;
 
   try {
-    const account = await getOnePayClient().createVirtualAccount(`FA${orderId}`, PARTNER_NAME);
+    const client = getOnePayClient();
+    let account: OnePayAccount | null = null;
+
+    if (!options.isNew && ref !== legacyOrderRef(orderId)) {
+      account = await client.findVirtualAccount(legacyOrderRef(orderId));
+    }
+    account ??= await client.createVirtualAccount(ref, PARTNER_NAME);
+
+    usedRef = account.orderRef;
     accountNumber = account.accountNumber;
     qrCodeUrl = buildVietQRUrl({
       accountNumber,
       amount,
-      addInfo: transferContent,
+      addInfo: buildTransferContent(usedRef),
       accountName: PARTNER_NAME,
     });
   } catch (err) {
-    console.error(`[partner-payment] OnePay error for FA-${orderId}:`, err);
+    console.error(`[partner-payment] OnePay error for ${ref}:`, err);
     qrPending = true;
   }
 
   return {
     orderId,
+    orderRef: usedRef,
     amount,
     qrCodeUrl,
     accountNumber,
-    transferContent,
+    transferContent: buildTransferContent(usedRef),
     qrPending,
     isMock: isOnePayMock(),
     voucher: null,
   };
 }
 
+/** Mã dịch vụ của gói trên đơn ("ED" khóa học, "FA" hội viên); null khi không đọc được. */
+async function getOrderServiceCode(orderId: number): Promise<string | null> {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("OrderID", sql.Int, orderId)
+    .query<{ ServiceCode: string | null }>(`
+      SELECT TOP (1) s.ServiceCode
+      FROM [EStocks_Data].[dbo].[service_Orders] o
+      INNER JOIN [EStocks_Data].[dbo].[service_Packages] p ON p.PackageID = o.PackageID
+      INNER JOIN [EStocks_Data].[dbo].[service_Services] s ON s.ServiceID = p.ServiceID
+      WHERE o.OrderID = @OrderID;
+    `);
+
+  return result.recordset[0]?.ServiceCode ?? null;
+}
+
 type ExistingOrderRow = {
   OrderID: number;
+  ServiceCode: string | null;
   Amount: number | null;
   ListAmount: number | null;
   UpgradeAmount: number | null;
@@ -293,6 +335,8 @@ type ExistingOrderRow = {
 
 export type CouponOrderState = {
   orderId: number;
+  /** Mã dịch vụ của gói ("ED" khóa học, "FA" hội viên) — dựng tham chiếu đơn, xem order-ref.ts */
+  serviceCode: string | null;
   /**
    * Số tiền khách phải chuyển: UpgradeAmount với đơn nâng cấp; giá gói trừ khoản giảm của
    * mã khuyến mại với đơn thường (đúng công thức service_GetOrderWithUserInfo của webhook).
@@ -318,6 +362,7 @@ export async function getOrderByCouponCode(couponCode: string): Promise<CouponOr
     .query<ExistingOrderRow>(`
       SELECT TOP (1)
         so.OrderID,
+        svc.ServiceCode,
         pkg.Amount - ISNULL(vu.DiscountAmount, 0) AS Amount,
         pkg.Amount AS ListAmount,
         so.UpgradeAmount,
@@ -327,6 +372,7 @@ export async function getOrderByCouponCode(couponCode: string): Promise<CouponOr
         so.EndDate
       FROM [EStocks_Data].[dbo].[service_Orders] so
       LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = so.PackageID
+      LEFT JOIN [EStocks_Data].[dbo].[service_Services] svc ON svc.ServiceID = pkg.ServiceID
       LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = so.OrderID
       WHERE so.CouponCode = @CouponCode
       ORDER BY
@@ -345,6 +391,7 @@ export async function getOrderByCouponCode(couponCode: string): Promise<CouponOr
 
   return {
     orderId: row.OrderID,
+    serviceCode: row.ServiceCode ?? null,
     amount: row.UpgradeAmount ?? row.Amount ?? 0,
     listAmount: row.ListAmount ?? 0,
     voucherDiscount: row.VoucherDiscount,

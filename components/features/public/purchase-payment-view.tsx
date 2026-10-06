@@ -23,6 +23,8 @@ export type PurchasePaymentViewModel = {
   /** Khoản giảm đang ghi trên đơn (0/null với mã tặng ngày) */
   discountAmount: number | null;
   orderId: number | null;
+  /** "ED15387365" (khóa học) / "FA15387365" — trùng nội dung chuyển khoản */
+  orderRef: string | null;
   accountNumber: string;
   transferContent: string;
   qrCodeUrl: string;
@@ -67,7 +69,7 @@ export function PurchasePaymentView({ view }: { view: PurchasePaymentViewModel }
             </Row>
             {view.orderId ? (
               <Row label="Mã đơn hàng">
-                <span className="num font-medium">FA{view.orderId}</span>
+                <span className="num font-medium">{view.orderRef ?? `FA${view.orderId}`}</span>
               </Row>
             ) : null}
           </dl>
@@ -139,7 +141,7 @@ export function PurchasePaymentView({ view }: { view: PurchasePaymentViewModel }
           </div>
           <div className="text-right text-sm">
             <div className="text-xs text-muted-foreground">Mã đơn hàng</div>
-            <div className="num font-semibold">{view.orderId ? `FA${view.orderId}` : "—"}</div>
+            <div className="num font-semibold">{view.orderId ? view.orderRef ?? `FA${view.orderId}` : "—"}</div>
             <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success">
               <TicketPercentIcon className="size-3.5" />
               <span className="font-mono">{view.voucherCode}</span>

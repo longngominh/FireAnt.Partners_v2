@@ -9,11 +9,18 @@ export type OnePayAccount = {
 
 export type OnePayClient = {
   createVirtualAccount(orderRef: string, partnerName: string): Promise<OnePayAccount>;
+  /**
+   * Tài khoản định danh ĐÃ cấp cho tham chiếu này; null khi OnePay không có user đó.
+   * Chỉ đọc — không bao giờ cấp tài khoản mới. Lỗi mạng / lỗi lạ thì ném (để nơi gọi không
+   * tưởng nhầm là "chưa có" rồi cấp thêm một số tài khoản khác cho cùng đơn).
+   */
+  findVirtualAccount(orderRef: string): Promise<OnePayAccount | null>;
 };
 
 type OnePayAccountInfo = {
   account_number?: string;
   swift_code?: string;
+  state?: string;
 };
 
 type OnePayCreateUserResponse = {
@@ -37,11 +44,19 @@ function mockOnePayClient(): OnePayClient {
         isMock: true,
       };
     },
+    async findVirtualAccount() {
+      // Mock không lưu trạng thái: coi như chưa có, createVirtualAccount sẽ dựng số từ mã đơn.
+      return null;
+    },
   };
 }
 
 function pickAccount(data: OnePayCreateUserResponse): OnePayAccountInfo | undefined {
-  if (Array.isArray(data.accounts)) return data.accounts[0];
+  // GET user trả "accounts" là MẢNG (PUT trả object): lấy tài khoản đang hoạt động, không có thì
+  // lấy phần tử đầu — cùng cách SingleOrArrayAccountConverter bên Corporate chọn.
+  if (Array.isArray(data.accounts)) {
+    return data.accounts.find((a) => a.state?.toLowerCase() === "active") ?? data.accounts[0];
+  }
   if (data.accounts && typeof data.accounts === "object") return data.accounts;
   if (data.account) return data.account;
   if (data.account_number) return { account_number: data.account_number };
@@ -188,6 +203,29 @@ function realOnePayClient(): OnePayClient {
       return {
         accountNumber,
         bankId: account?.swift_code ?? cfg.bankId,
+        orderRef,
+        isMock: false,
+      };
+    },
+
+    async findVirtualAccount(orderRef) {
+      const cfg = loadOnePayConfig();
+      const uri = `/paycollect/api/v1/partners/${cfg.partner}/users/${orderRef}`;
+      const result = await sendSignedRequest(cfg, "GET", uri, "");
+
+      // OnePay báo "không có user" bằng HTTP 200 + {"state":"failed","errorCode":11,
+      // "message":"Select Entity Error."} (log Corporate 17/09/2026), không phải 404.
+      if (result.status === 404) return null;
+      if (!result.ok) {
+        throw new Error(result.data.error?.message ?? result.data.message ?? `OnePay error ${result.status}`);
+      }
+
+      const accountNumber = pickAccount(result.data)?.account_number ?? "";
+      if (!accountNumber) return null;
+
+      return {
+        accountNumber,
+        bankId: pickAccount(result.data)?.swift_code ?? cfg.bankId,
         orderRef,
         isMock: false,
       };

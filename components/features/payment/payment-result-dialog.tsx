@@ -64,7 +64,7 @@ export function PaymentResultDialog({
                     )}
                   </div>
                   {result.orderId ? (
-                    <code className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium">FA{result.orderId}</code>
+                    <code className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium">{result.orderRef ?? `FA${result.orderId}`}</code>
                   ) : null}
                   <Button
                     type="button"
