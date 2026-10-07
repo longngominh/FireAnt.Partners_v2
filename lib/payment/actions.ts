@@ -34,6 +34,7 @@ import {
   createPartnerUpgradeOrder,
   getPackageInfo,
 } from "@/lib/payment/order-payment";
+import { corporatePaymentMethodCode, isCardPayment, type PaymentMethod } from "@/lib/payment/payment-method";
 import { buildUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { buildVoucherPaymentLink, normalizeVoucherCode } from "@/lib/payment/voucher-link";
 import { previewVoucher } from "@/lib/payment/voucher";
@@ -50,6 +51,10 @@ import type {
 /** service_ApplyVoucher bắt buộc AspNetUsers.Id — khách chỉ có email thì chưa dùng mã được. */
 const VOUCHER_NEEDS_ACCOUNT =
   "Mã khuyến mại chỉ dùng được khi khách đã có tài khoản FireAnt. Bấm “Tạo tài khoản cho khách”, hoặc bỏ mã để tạo link giá gốc.";
+
+/** Cổng thẻ đi qua /pay của Corporate — đường đó tạo đơn giá gốc (lib/payment/payment-method.ts). */
+const VOUCHER_NEEDS_BANK_TRANSFER =
+  "Mã khuyến mại chỉ áp dụng khi khách chuyển khoản / QR. Bỏ mã, hoặc chọn lại phương thức Chuyển khoản / QR.";
 
 /** Số tài khoản một CTV được tạo hộ khách trong 24 giờ (admin không giới hạn). */
 const ACCOUNT_CREATE_LIMIT_PER_DAY = 20;
@@ -175,6 +180,7 @@ export async function createPaymentAction(
     voucherCode: formData.get("voucherCode") ?? "",
     source: formData.get("source") ?? "",
     customerPhone: formData.get("customerPhone") ?? "",
+    paymentMethod: formData.get("paymentMethod") ?? "bank",
   });
 
   if (!parsed.success || !extras.success) {
@@ -192,7 +198,8 @@ export async function createPaymentAction(
     const resolved = await resolvePartner(session, formData);
     if ("error" in resolved) return resolved.error;
     const { partnerId } = resolved;
-    const { voucherCode, source } = extras.data;
+    const { voucherCode, source, paymentMethod } = extras.data;
+    const payByCard = isCardPayment(paymentMethod);
 
     // Giá lấy từ DB, không tin số tiền client gửi lên.
     const pkg = await getPackageInfo(parsed.data.packageId);
@@ -238,6 +245,7 @@ export async function createPaymentAction(
         error: message,
         fieldErrors: { voucherCode: [message] },
       });
+      if (payByCard) return failed(VOUCHER_NEEDS_BANK_TRANSFER);
       if (!customerUserId) return failed(VOUCHER_NEEDS_ACCOUNT);
 
       const check = await previewVoucher({
@@ -264,27 +272,31 @@ export async function createPaymentAction(
           userName: customerUserName,
           voucherCode: voucher.code,
         })
-      : buildCheckoutLink(code, parsed.data.packageId, customerUserName);
+      : buildCheckoutLink(code, parsed.data.packageId, customerUserName, paymentMethod);
     const publicLink = voucher ? shortLink : paymentLink;
 
     const note = parsed.data.note?.trim() || null;
 
-    let paymentOrder: Awaited<ReturnType<typeof createPartnerPaymentOrder>>;
-    try {
-      paymentOrder = await createPartnerPaymentOrder({
-        packageId: parsed.data.packageId,
-        userName: customerUserName,
-        amount,
-        couponCode: code,
-        note,
-        staff: staffOf(session),
-        voucher: voucher ? { code: voucher.code, userId: voucher.userId } : null,
-      });
-    } catch (err) {
-      if (err instanceof VoucherApplyError) {
-        return { ok: false, error: err.message, fieldErrors: { voucherCode: [err.message] } };
+    // Thẻ: /pay của Corporate tạo đơn lúc khách mở link (mỗi lượt một đơn — OnePay cần mã giao dịch
+    // riêng cho mỗi lần thanh toán), nên không tạo sẵn đơn + tài khoản định danh ở đây.
+    let paymentOrder: Awaited<ReturnType<typeof createPartnerPaymentOrder>> | null = null;
+    if (!payByCard) {
+      try {
+        paymentOrder = await createPartnerPaymentOrder({
+          packageId: parsed.data.packageId,
+          userName: customerUserName,
+          amount,
+          couponCode: code,
+          note,
+          staff: staffOf(session),
+          voucher: voucher ? { code: voucher.code, userId: voucher.userId } : null,
+        });
+      } catch (err) {
+        if (err instanceof VoucherApplyError) {
+          return { ok: false, error: err.message, fieldErrors: { voucherCode: [err.message] } };
+        }
+        throw err;
       }
-      throw err;
     }
 
     try {
@@ -297,12 +309,14 @@ export async function createPaymentAction(
         note,
         source,
         voucherCode: voucher?.code ?? null,
-        discountAmount: paymentOrder.voucher?.discountAmount ?? null,
+        discountAmount: paymentOrder?.voucher?.discountAmount ?? null,
         customerPhone,
       });
     } catch (err) {
       // Đơn đã giữ một lượt của mã mà không có coupon thì không ai gửi được link — trả lượt lại.
-      if (voucher) await cancelPartnerOrderQuietly(paymentOrder.orderId, `Khong tao duoc coupon ${code}`);
+      if (voucher && paymentOrder) {
+        await cancelPartnerOrderQuietly(paymentOrder.orderId, `Khong tao duoc coupon ${code}`);
+      }
       throw err;
     }
 
@@ -323,7 +337,7 @@ export async function createPaymentAction(
       : `${tierName(pkg.serviceId ?? 33)} · ${durationLabel(pkg.months)}`;
 
     const appliedVoucher: AppliedVoucher | null =
-      voucher && paymentOrder.voucher
+      voucher && paymentOrder?.voucher
         ? {
             code: voucher.code,
             title: voucher.title,
@@ -340,14 +354,15 @@ export async function createPaymentAction(
         shortLink,
         paymentLink,
         publicLink,
-        qrCodeUrl: paymentOrder.qrCodeUrl || (await qrToDataUrl(publicLink)),
-        orderId: paymentOrder.orderId,
-        orderRef: paymentOrder.orderRef,
-        accountNumber: paymentOrder.accountNumber,
-        transferContent: paymentOrder.transferContent,
-        qrPending: paymentOrder.qrPending,
-        isMock: paymentOrder.isMock,
-        orderAmount: paymentOrder.amount,
+        paymentMethod,
+        qrCodeUrl: paymentOrder?.qrCodeUrl || (await qrToDataUrl(publicLink)),
+        orderId: paymentOrder?.orderId ?? null,
+        orderRef: paymentOrder?.orderRef ?? null,
+        accountNumber: paymentOrder?.accountNumber ?? "",
+        transferContent: paymentOrder?.transferContent ?? null,
+        qrPending: paymentOrder?.qrPending ?? false,
+        isMock: paymentOrder?.isMock ?? false,
+        orderAmount: paymentOrder?.amount ?? amount,
         customerEmail: customerUserName,
         customerHasAccount,
         note,
@@ -369,12 +384,15 @@ export async function createPaymentAction(
   }
 }
 
-/** Link checkout Corporate cho coupon mua gói KHÔNG có mã khuyến mại (như trước). */
-function buildCheckoutLink(code: string, packageId: number, userName: string): string {
+/**
+ * Link checkout Corporate cho coupon mua gói KHÔNG có mã khuyến mại. paymentMethod= quyết định /pay
+ * trả QR chuyển khoản hay chuyển sang cổng thẻ OnePay (lib/payment/payment-method.ts).
+ */
+function buildCheckoutLink(code: string, packageId: number, userName: string, method: PaymentMethod): string {
   const paymentBaseUrl = process.env.PAYMENT_BASE_URL ?? "https://fireant.vn/checkout";
   const paymentUrl = new URL(paymentBaseUrl);
   paymentUrl.searchParams.set("packageId", String(packageId));
-  paymentUrl.searchParams.set("paymentMethod", "1");
+  paymentUrl.searchParams.set("paymentMethod", String(corporatePaymentMethodCode(method)));
   paymentUrl.searchParams.set("couponCode", code);
   paymentUrl.searchParams.set("userName", userName);
   return paymentUrl.toString();
@@ -728,6 +746,7 @@ export async function createUpgradePaymentAction(
         shortLink,
         paymentLink,
         publicLink: shortLink,
+        paymentMethod: "bank",
         qrCodeUrl: paymentOrder.qrCodeUrl || (await qrToDataUrl(shortLink)),
         orderId: paymentOrder.orderId,
         orderRef: paymentOrder.orderRef,

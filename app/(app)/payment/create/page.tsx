@@ -45,8 +45,9 @@ export default async function CreatePaymentPage({
           <h1 className="text-2xl font-semibold tracking-tight">Tạo link thanh toán</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Bán gói hội viên, khóa học hoặc nâng cấp hạng cho khách đang dùng. Hệ thống tạo đơn hàng, link rút gọn và
-            QR chuyển khoản định danh ngay lập tức — kích hoạt tự động khi nhận tiền. Có thể áp mã khuyến mại do
-            FireAnt cấp và gắn nguồn khách để theo dõi.
+            QR chuyển khoản định danh ngay lập tức — kích hoạt tự động khi nhận tiền. Khách mua gói muốn trả bằng thẻ
+            (nội địa hoặc Visa/Mastercard/JCB) thì chọn ở bước 3. Có thể áp mã khuyến mại do FireAnt cấp và gắn
+            nguồn khách để theo dõi.
           </p>
         </div>
         <Button asChild variant="outline" className="gap-2">

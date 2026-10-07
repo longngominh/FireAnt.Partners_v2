@@ -1,3 +1,5 @@
+import type { PaymentMethod } from "./payment-method";
+
 export type PaymentResultKind = "purchase" | "upgrade";
 
 /** Mã khuyến mại đã áp (hoặc sẽ áp) vào đơn mua gói. */
@@ -78,6 +80,8 @@ export type CreatePaymentResult = {
   paymentLink: string;
   /** Link gửi cho khách hàng */
   publicLink: string;
+  /** Thẻ: không tạo sẵn đơn — qrCodeUrl là QR mở publicLink, không có tài khoản nhận */
+  paymentMethod: PaymentMethod;
   qrCodeUrl: string;
   orderId: number | null;
   /** Mã đơn hiển thị cạnh QR — "ED15387365" (khóa học) / "FA15387365", trùng nội dung chuyển khoản */

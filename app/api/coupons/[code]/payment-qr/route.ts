@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { getCouponByCode } from "@/lib/data/payment";
 import { getOrCreatePartnerPaymentOrder } from "@/lib/payment/order-payment";
+import { isCardPayment, paymentMethodOfLink } from "@/lib/payment/payment-method";
 
 export async function GET(
   _request: NextRequest,
@@ -20,6 +21,14 @@ export async function GET(
 
   if (!coupon.paymentLink) {
     return NextResponse.json({ error: "Coupon chưa có link thanh toán." }, { status: 400 });
+  }
+
+  // Link thẻ: đơn do checkout Corporate tạo khi khách mở link — không cấp đơn chuyển khoản ở đây.
+  if (isCardPayment(paymentMethodOfLink(coupon.paymentLink))) {
+    return NextResponse.json(
+      { error: "Link thanh toán thẻ không có QR chuyển khoản — khách mở link để trả qua cổng OnePay." },
+      { status: 400 },
+    );
   }
 
   try {

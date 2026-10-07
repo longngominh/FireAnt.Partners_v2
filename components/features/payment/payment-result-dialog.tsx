@@ -2,7 +2,7 @@
 
 import { format } from "date-fns";
 import { vi } from "date-fns/locale";
-import { ArrowRightIcon, CopyIcon, DownloadIcon, LinkIcon, QrCodeIcon } from "lucide-react";
+import { ArrowRightIcon, CopyIcon, CreditCardIcon, DownloadIcon, LinkIcon, QrCodeIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatVND } from "@/lib/utils/currency";
+import { PAYMENT_METHOD_META, isCardPayment } from "@/lib/payment/payment-method";
 import { RECEIVING_BANK } from "@/lib/payment/tiers";
 import type { CreatePaymentResult } from "@/lib/payment/types";
 import { TierBadge, copyText, downloadImage } from "./form-bits";
@@ -27,6 +28,9 @@ export function PaymentResultDialog({
 }) {
   const isUpgrade = result?.kind === "upgrade";
   const voucher = result?.voucher ?? null;
+  // Link thẻ không có đơn tạo sẵn: QR là QR mở link, khách nhập thẻ trên cổng OnePay.
+  const payByCard = result ? isCardPayment(result.paymentMethod) : false;
+  const method = result ? PAYMENT_METHOD_META[result.paymentMethod] : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -37,15 +41,27 @@ export function PaymentResultDialog({
           <>
             <DialogHeader className="px-6 pt-5 pb-3">
               <DialogTitle className="flex items-center gap-2">
-                {isUpgrade ? <QrCodeIcon className="size-4 text-primary" /> : <LinkIcon className="size-4 text-primary" />}
-                {isUpgrade ? "Link nâng cấp đã sẵn sàng" : "Link thanh toán đã sẵn sàng"}
+                {isUpgrade ? (
+                  <QrCodeIcon className="size-4 text-primary" />
+                ) : payByCard ? (
+                  <CreditCardIcon className="size-4 text-primary" />
+                ) : (
+                  <LinkIcon className="size-4 text-primary" />
+                )}
+                {isUpgrade
+                  ? "Link nâng cấp đã sẵn sàng"
+                  : payByCard
+                    ? "Link thanh toán thẻ đã sẵn sàng"
+                    : "Link thanh toán đã sẵn sàng"}
               </DialogTitle>
               <DialogDescription>
                 {isUpgrade
                   ? "Gửi link hoặc QR cho khách. Khách chuyển đúng số tiền — gói được nâng cấp tự động ngay khi nhận tiền."
-                  : voucher
-                    ? "Gửi link hoặc QR cho khách. Khách chuyển đúng số tiền đã trừ mã khuyến mại — gói kích hoạt tự động ngay khi nhận tiền."
-                    : "Chia sẻ QR chuyển khoản hoặc link thanh toán cho khách hàng."}
+                  : payByCard && method
+                    ? `Gửi link hoặc QR cho khách. Mở link, khách được chuyển sang cổng OnePay để trả bằng ${method.label.toLowerCase()} (${method.detail}) — gói kích hoạt tự động khi thanh toán thành công.`
+                    : voucher
+                      ? "Gửi link hoặc QR cho khách. Khách chuyển đúng số tiền đã trừ mã khuyến mại — gói kích hoạt tự động ngay khi nhận tiền."
+                      : "Chia sẻ QR chuyển khoản hoặc link thanh toán cho khách hàng."}
               </DialogDescription>
             </DialogHeader>
 
@@ -65,6 +81,8 @@ export function PaymentResultDialog({
                   </div>
                   {result.orderId ? (
                     <code className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium">{result.orderRef ?? `FA${result.orderId}`}</code>
+                  ) : payByCard ? (
+                    <span className="text-center text-[11px] text-muted-foreground">Quét để mở link thanh toán</span>
                   ) : null}
                   <Button
                     type="button"
@@ -72,7 +90,12 @@ export function PaymentResultDialog({
                     size="sm"
                     disabled={!result.qrCodeUrl}
                     className="mt-1 w-full gap-1.5"
-                    onClick={() => downloadImage(result.qrCodeUrl, `qr-${result.code}.jpg`)}
+                    onClick={() =>
+                      downloadImage(
+                        result.qrCodeUrl,
+                        `qr-${result.code}.${result.qrCodeUrl.startsWith("data:image/png") ? "png" : "jpg"}`,
+                      )
+                    }
                   >
                     <DownloadIcon className="size-3.5" /> Tải QR
                   </Button>
@@ -118,6 +141,11 @@ export function PaymentResultDialog({
                     <Row label="Tài khoản FireAnt">
                       <span className="truncate font-medium">{result.customerEmail ?? "—"}</span>
                     </Row>
+                    {method ? (
+                      <Row label="Thanh toán">
+                        <span className="font-medium">{method.label}</span>
+                      </Row>
+                    ) : null}
                     {voucher ? (
                       <Row label="Mã khuyến mại">
                         <span className="flex flex-col items-end">

@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { LinkIcon, UserRoundIcon } from "lucide-react";
+import { CreditCardIcon, GlobeIcon, LinkIcon, QrCodeIcon, UserRoundIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,12 +14,19 @@ import {
   type CreatePaymentState,
   type VoucherPreview,
 } from "@/lib/payment/types";
+import {
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_META,
+  isCardPayment,
+  type PaymentMethod,
+} from "@/lib/payment/payment-method";
 import { normalizeVnPhone } from "@/lib/payment/phone";
 import { normalizeSource } from "@/lib/payment/source";
 import { durationLabel, tierMeta } from "@/lib/payment/tiers";
 import type { ServicePackage } from "@/lib/data/packages";
 import { cn } from "@/lib/utils";
 import {
+  Callout,
   ChoiceCard,
   StepCard,
   SummaryCard,
@@ -47,6 +54,12 @@ type ServiceGroup = {
   serviceName: string;
   isCourse: boolean;
   packages: ServicePackage[];
+};
+
+const METHOD_ICONS: Record<PaymentMethod, LucideIcon> = {
+  bank: QrCodeIcon,
+  "domestic-card": CreditCardIcon,
+  "intl-card": GlobeIcon,
 };
 
 export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions }: Props) {
@@ -87,6 +100,8 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
   // Kết quả "Áp dụng" lúc bấm tạo link — server bác mã (vừa hết lượt, hết hạn…) thì lỗi chỉ
   // gắn với đúng kết quả đó, áp dụng lại là hết.
   const [submittedVoucher, setSubmittedVoucher] = useState<VoucherPreview | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank");
+  const payByCard = isCardPayment(paymentMethod);
 
   const currentService = services.find((s) => s.serviceId === selectedServiceId) ?? null;
   const isCourse = currentService?.isCourse ?? false;
@@ -107,12 +122,14 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
         }
       : voucherPreview;
 
-  // Mã chỉ được gửi lên khi kết quả "Áp dụng" còn khớp mã + gói + khách đang nhập.
-  const currentVoucher = isCurrentPreview(effectivePreview, voucherCode, selectedPackage?.packageId ?? null, customer)
-    ? effectivePreview
-    : null;
+  // Mã chỉ được gửi lên khi kết quả "Áp dụng" còn khớp mã + gói + khách đang nhập. Thanh toán
+  // thẻ bỏ qua mã (cổng thẻ thu giá gói); mã vẫn giữ trong ô để chọn lại chuyển khoản là dùng được.
+  const currentVoucher =
+    !payByCard && isCurrentPreview(effectivePreview, voucherCode, selectedPackage?.packageId ?? null, customer)
+      ? effectivePreview
+      : null;
   const appliedVoucher = currentVoucher?.ok ? currentVoucher : null;
-  const voucherUnchecked = voucherCode.trim() !== "" && !appliedVoucher;
+  const voucherUnchecked = !payByCard && voucherCode.trim() !== "" && !appliedVoucher;
   const finalAmount = appliedVoucher ? appliedVoucher.finalAmount : (selectedPackage?.amount ?? 0);
   const sourceLabel = normalizeSource(source);
 
@@ -135,6 +152,8 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
       // Mã khuyến mại thường dùng cho một đơn; nguồn giữ lại vì hay tạo nhiều link cùng kênh.
       setVoucherCode("");
       setVoucherPreview(null);
+      // Thẻ là theo yêu cầu riêng của từng khách — link sau quay về chuyển khoản.
+      setPaymentMethod("bank");
     } else if (state.error && state.error !== lastSeenErrorRef.current) {
       lastSeenErrorRef.current = state.error;
       toast.error(state.error);
@@ -199,6 +218,7 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
       ) : null}
       {partnerId ? <input type="hidden" name="partnerId" value={partnerId} /> : null}
       {appliedVoucher ? <input type="hidden" name="voucherCode" value={appliedVoucher.code} /> : null}
+      <input type="hidden" name="paymentMethod" value={paymentMethod} />
 
       <div className="flex flex-col gap-5">
         <StepCard
@@ -371,16 +391,65 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
             </div>
           </div>
         </StepCard>
+
+        <StepCard
+          step={3}
+          title="Phương thức thanh toán"
+          description="Link mở đúng phương thức đã chọn. Khách muốn trả bằng thẻ tín dụng thì chọn Thẻ quốc tế."
+        >
+          <div role="radiogroup" aria-label="Phương thức thanh toán" className="grid gap-3 sm:grid-cols-3">
+            {PAYMENT_METHODS.map((method) => {
+              const meta = PAYMENT_METHOD_META[method];
+              const Icon = METHOD_ICONS[method];
+              return (
+                <ChoiceCard
+                  key={method}
+                  active={paymentMethod === method}
+                  onSelect={() => setPaymentMethod(method)}
+                  className="p-4"
+                >
+                  <div className="flex flex-col gap-2 pr-6">
+                    <Icon className="size-5 text-muted-foreground" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
+                        {meta.label}
+                        {method === "bank" ? (
+                          <span className="rounded-full bg-success/12 px-1.5 py-0.5 text-[10px] font-semibold text-success">
+                            Nên dùng
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{meta.detail}</span>
+                    </div>
+                  </div>
+                </ChoiceCard>
+              );
+            })}
+          </div>
+          {payByCard ? (
+            <Callout
+              title="Khách nhập thẻ trên cổng thanh toán OnePay"
+              detail="Đơn hàng được tạo khi khách mở link, gói kích hoạt tự động khi thanh toán thành công. Link thẻ không có QR chuyển khoản và không áp dụng mã khuyến mại."
+            />
+          ) : null}
+        </StepCard>
       </div>
 
       {/* Summary */}
       <SummaryCard
         title="Tóm tắt đơn"
         footer={
-          <span>
-            Link có hiệu lực <strong className="font-semibold text-foreground">14 ngày</strong>. Hệ thống tạo đơn
-            hàng chờ + QR chuyển khoản định danh ngay khi bạn bấm tạo.
-          </span>
+          payByCard ? (
+            <span>
+              Link có hiệu lực <strong className="font-semibold text-foreground">14 ngày</strong>. Khách mở link sẽ
+              được chuyển sang cổng OnePay để thanh toán bằng thẻ.
+            </span>
+          ) : (
+            <span>
+              Link có hiệu lực <strong className="font-semibold text-foreground">14 ngày</strong>. Hệ thống tạo đơn
+              hàng chờ + QR chuyển khoản định danh ngay khi bạn bấm tạo.
+            </span>
+          )
         }
       >
         {selectedPackage ? (
@@ -422,7 +491,7 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
                   <span className="block max-w-[180px] truncate">{sourceLabel}</span>
                 </SummaryRow>
               ) : null}
-              <SummaryRow label="Thanh toán">Chuyển khoản / QR</SummaryRow>
+              <SummaryRow label="Thanh toán">{PAYMENT_METHOD_META[paymentMethod].label}</SummaryRow>
               {appliedVoucher ? (
                 <SummaryRow label="Mã khuyến mại">
                   <span className="flex flex-col items-end">
@@ -442,14 +511,22 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
               ) : null}
             </div>
             <div className="border-t pt-4">
-              <VoucherField
-                code={voucherCode}
-                onCodeChange={setVoucherCode}
-                preview={effectivePreview}
-                onPreviewChange={setVoucherPreview}
-                packageId={selectedPackage.packageId}
-                customer={customer}
-              />
+              {payByCard ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  <span className="font-medium text-foreground">Mã khuyến mại</span> chỉ áp dụng khi khách chuyển
+                  khoản / QR — cổng thẻ thu đúng giá gói.
+                  {voucherCode ? ` Chọn lại Chuyển khoản / QR để dùng mã ${voucherCode}.` : null}
+                </p>
+              ) : (
+                <VoucherField
+                  code={voucherCode}
+                  onCodeChange={setVoucherCode}
+                  preview={effectivePreview}
+                  onPreviewChange={setVoucherPreview}
+                  packageId={selectedPackage.packageId}
+                  customer={customer}
+                />
+              )}
             </div>
           </>
         ) : (
@@ -457,8 +534,8 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
         )}
 
         <Button type="submit" disabled={!canSubmit} className="h-10 w-full gap-2 text-sm">
-          <LinkIcon className="size-4" />
-          {pending ? "Đang tạo link…" : "Tạo link & mã QR"}
+          {payByCard ? <CreditCardIcon className="size-4" /> : <LinkIcon className="size-4" />}
+          {pending ? "Đang tạo link…" : payByCard ? "Tạo link thanh toán thẻ" : "Tạo link & mã QR"}
         </Button>
         {submitHint && selectedPackage && !pending ? (
           <p className="-mt-2 text-center text-xs text-muted-foreground">{submitHint}</p>

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatVND } from "@/lib/utils/currency";
 import { qrToDataUrl } from "@/lib/utils/qr";
+import { PAYMENT_METHOD_META, isCardPayment, paymentMethodOfLink } from "@/lib/payment/payment-method";
 import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { isHostedPaymentLink } from "@/lib/payment/voucher-link";
 import { StatusBadge } from "./status-badge";
@@ -44,6 +45,8 @@ export function CouponRowActions({
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
   const isUpgrade = isUpgradePaymentLink(paymentLink);
   const isHosted = isHostedPaymentLink(paymentLink);
+  const method = paymentMethodOfLink(paymentLink);
+  const payByCard = isCardPayment(method);
 
   /**
    * Coupon nâng cấp / có mã khuyến mại: gửi khách link rút gọn /p/{code} (trang QR công khai),
@@ -68,6 +71,14 @@ export function CouponRowActions({
 
   async function ensureQr() {
     if (paymentQr?.qrCodeUrl) return paymentQr.qrCodeUrl;
+
+    // Link thẻ không có QR chuyển khoản (đơn do checkout Corporate tạo khi khách mở link):
+    // QR mở link, khách nhập thẻ trên cổng OnePay.
+    if (payByCard) {
+      const qrCodeUrl = await qrToDataUrl(shareLink());
+      setPaymentQr({ orderId: 0, qrCodeUrl, accountNumber: "", qrPending: false, isMock: false });
+      return qrCodeUrl;
+    }
 
     setIsGeneratingQr(true);
     try {
@@ -175,7 +186,7 @@ export function CouponRowActions({
               <StatusBadge status={coupon.status} />
             </DialogTitle>
             <DialogDescription>
-              {isUpgrade ? "Nâng cấp hội viên · " : ""}
+              {isUpgrade ? "Nâng cấp hội viên · " : payByCard ? `${PAYMENT_METHOD_META[method].label} · ` : ""}
               {coupon.customerName ?? "Chưa sử dụng"}
               {coupon.packageName ? ` · ${coupon.packageName}` : ""}
             </DialogDescription>
@@ -238,6 +249,11 @@ export function CouponRowActions({
           {paymentQr?.isMock ? (
             <div className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs text-warning">
               OnePay đang ở mock mode. Cần cấu hình ONEPAY_MODE=real để dùng QR thật.
+            </div>
+          ) : null}
+          {payByCard ? (
+            <div className="rounded-lg border bg-muted/40 p-2 text-xs text-muted-foreground">
+              QR mở link thanh toán — khách nhập thẻ trên cổng OnePay, không chuyển khoản.
             </div>
           ) : null}
 

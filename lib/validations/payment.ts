@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PAYMENT_METHODS } from "@/lib/payment/payment-method";
 import { PHONE_INVALID_MESSAGE, PHONE_REQUIRED_MESSAGE, normalizeVnPhone } from "@/lib/payment/phone";
 import { SOURCE_MAX_LENGTH, normalizeSource } from "@/lib/payment/source";
 import { VOUCHER_CODE_RE, normalizeVoucherCode } from "@/lib/payment/voucher-link";
@@ -43,6 +44,7 @@ export const createPaymentExtrasSchema = z.object({
   voucherCode: voucherCodeSchema,
   source: sourceSchema,
   customerPhone: phoneSchema,
+  paymentMethod: z.enum(PAYMENT_METHODS, { message: "Phương thức thanh toán không hợp lệ" }),
 });
 
 /** Form "Tạo tài khoản cho khách". */

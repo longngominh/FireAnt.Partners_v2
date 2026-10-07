@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { formatVND } from "@/lib/utils/currency";
 import type { Coupon } from "@/lib/data/payment";
+import { PAYMENT_METHOD_META, isCardPayment, paymentMethodOfLink } from "@/lib/payment/payment-method";
 import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { StatusBadge } from "./status-badge";
 import { CouponRowActions } from "./coupon-row-actions";
@@ -56,7 +57,9 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
                       <span className="rounded-full bg-primary/10 px-1.5 py-px text-[10px] font-semibold text-primary">
                         Nâng cấp
                       </span>
-                    ) : null}
+                    ) : (
+                      <CardMethodBadge paymentLink={coupon.paymentLink} />
+                    )}
                   </span>
                   {coupon.packageName ? (
                     <span className="text-xs text-muted-foreground">{coupon.packageName}</span>
@@ -116,5 +119,16 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
       </Table>
       </div>
     </Card>
+  );
+}
+
+/** Nhãn link thanh toán thẻ; link chuyển khoản (mặc định) không gắn nhãn. */
+function CardMethodBadge({ paymentLink }: { paymentLink: string }) {
+  const method = paymentMethodOfLink(paymentLink);
+  if (!isCardPayment(method)) return null;
+  return (
+    <span className="whitespace-nowrap rounded-full bg-info/10 px-1.5 py-px text-[10px] font-semibold text-info">
+      {PAYMENT_METHOD_META[method].label}
+    </span>
   );
 }
