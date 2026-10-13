@@ -48,6 +48,10 @@ export async function findFireAntUser(
  *   (OTP giao dịch, mở tài khoản chứng khoán…) vẫn bắt khách xác thực; ZNS sau thanh toán và
  *   webhook khóa học thì dùng được ngay (đọc PhoneNumber, không xét Confirmed).
  * - Cùng cách Admin_V3 sửa số hội viên (modules/members/service.ts).
+ * - Chạy pass-through `EXEC (...) AT NEWFA` để lệnh chạy hẳn trên máy Identity (seek theo khóa Id).
+ *   Đừng quay lại `UPDATE NEWFA.FireAnt_Identity.dbo.AspNetUsers ... WHERE Id = @UserId`: NEWFA để
+ *   collation compatible = false nên SQL Server kéo cả bảng AspNetUsers (~2 triệu dòng) về máy này
+ *   rồi mới lọc theo Id → lần nào cũng quá timeout 15 s (17/17 lần FILL_PHONE 02–12/10/2026 thất bại).
  *
  * Trả về true nếu đã ghi; false nếu tài khoản đã có số / không tồn tại.
  */
@@ -58,15 +62,17 @@ export async function setFireAntUserPhoneIfEmpty(userId: string, phone: string):
     .input("UserId", sql.NVarChar(128), userId)
     .input("Phone", sql.NVarChar(20), phone)
     .query<{ Updated: number }>(`
-      SET XACT_ABORT ON;
+      EXEC (N'
+        SET NOCOUNT ON;
 
-      UPDATE NEWFA.FireAnt_Identity.dbo.AspNetUsers
-      SET PhoneNumber = @Phone,
-          PhoneNumberConfirmed = 0
-      WHERE Id = @UserId
-        AND (PhoneNumber IS NULL OR LTRIM(RTRIM(PhoneNumber)) = N'');
+        UPDATE FireAnt_Identity.dbo.AspNetUsers
+        SET PhoneNumber = ?,
+            PhoneNumberConfirmed = 0
+        WHERE Id = ?
+          AND (PhoneNumber IS NULL OR LTRIM(RTRIM(PhoneNumber)) = N'''');
 
-      SELECT @@ROWCOUNT AS Updated;
+        SELECT @@ROWCOUNT AS Updated;
+      ', @Phone, @UserId) AT NEWFA;
     `);
 
   return (res.recordset[0]?.Updated ?? 0) > 0;
