@@ -123,7 +123,7 @@ export default async function PartnerDetailPage({
   const fees = Object.fromEntries(
     CONTRACT_TIERS.map((tier) => {
       const rem = calcPartnerRemuneration("collaborator", tier, remunerationBase(current.total));
-      return [tier, formatShortVND(payableAmount(rem))];
+      return [tier, formatVND(payableAmount(rem))];
     }),
   ) as Record<ContractTier, string>;
 
@@ -250,7 +250,7 @@ export default async function PartnerDetailPage({
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label={`DS tính thù lao T${monthNumber}`}
-          value={formatShortVND(r.revenue)}
+          value={formatVND(r.revenue)}
           hint={
             r.policy === "tier"
               ? `${formatNumber(current.total.new.customers)} khách mua hội viên lần đầu`
@@ -259,7 +259,7 @@ export default async function PartnerDetailPage({
         />
         <StatCard
           label={isPartner ? "Phí/thù lao tạm tính" : "Hoa hồng tạm tính"}
-          value={formatShortVND(payout)}
+          value={formatVND(payout)}
           hint={`${isPartner ? contractTierScheme(current.tier) : "Bậc NVKD"} · hiệu dụng ${formatPercent(r.effectiveRate)}`}
           tone="success"
         />
@@ -345,10 +345,10 @@ export default async function PartnerDetailPage({
               {isPartner ? <TierBadge tier={selected.tier} size="md" /> : null}
               <span className="text-muted-foreground">
                 {selected.remuneration.policy === "tier"
-                  ? `Căn cứ: doanh thu khách mua hội viên lần đầu ${formatShortVND(selected.total.new.revenue)} (trực tiếp ${formatShortVND(
+                  ? `Căn cứ: doanh thu khách mua hội viên lần đầu ${formatVND(selected.total.new.revenue)} (trực tiếp ${formatVND(
                       selected.direct.new.revenue,
-                    )} + nhân viên ${formatShortVND(selected.staff.new.revenue)})`
-                  : `Căn cứ: doanh số gói hội viên ${formatShortVND(selected.remuneration.revenue)} (không gồm khóa học)`}
+                    )} + nhân viên ${formatVND(selected.staff.new.revenue)})`
+                  : `Căn cứ: doanh số gói hội viên ${formatVND(selected.remuneration.revenue)} (không gồm khóa học)`}
               </span>
             </div>
             {lines.length > 0 ? (
@@ -395,7 +395,7 @@ export default async function PartnerDetailPage({
               <dt className="text-muted-foreground">Loại đối tác</dt>
               <dd className="text-right font-semibold">{isPartner ? (isCompany ? "Pháp nhân" : "Cá nhân") : "NVKD FireAnt"}</dd>
               <dt className="text-muted-foreground">Mã số thuế</dt>
-              <dd className={cn("text-right font-semibold", !summary.taxCode && "text-destructive")}>
+              <dd className={cn("text-right", summary.taxCode ? "font-semibold" : "text-muted-foreground")}>
                 {summary.taxCode ?? "Chưa cập nhật"}
               </dd>
               <dt className="text-muted-foreground">Tài khoản</dt>
@@ -407,7 +407,7 @@ export default async function PartnerDetailPage({
               {lastMonth ? (
                 <>
                   <dt className="text-muted-foreground">Kỳ {formatMonthShort(lastMonth.month)}</dt>
-                  <dd className="num text-right font-semibold">{formatShortVND(payableAmount(lastMonth.remuneration))}</dd>
+                  <dd className="num text-right font-semibold">{formatVND(payableAmount(lastMonth.remuneration))}</dd>
                 </>
               ) : null}
             </dl>

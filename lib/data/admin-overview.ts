@@ -1,27 +1,30 @@
-import { calcPartnerRemuneration, CONTRACT_TIERS, type ContractTier } from "@/lib/commission";
+import { CONTRACT_TIERS, type ContractTier } from "@/lib/commission";
 import { payableAmount } from "@/lib/earnings/explain";
-import { getContractTierHistory, tierInMonth } from "@/lib/data/contracts";
 import { getPartnerPaymentInfoMap, missingPaymentFields, type PartnerPaymentInfo } from "@/lib/data/partner-payment-info";
-import { getMonthlyRevenueReport, recentMonths, type MonthlyPartnerRevenue } from "@/lib/data/revenue";
-import { getRevenueBreakdowns, remunerationBase } from "@/lib/data/revenue-breakdown";
+import { getMonthlyRevenueReport, type MonthlyPartnerRevenue } from "@/lib/data/revenue";
 import { countActiveStaffByPartner, getStaffStats, listStaffApplications, type StaffStats } from "@/lib/data/staff";
-import { currentMonthKey, monthRange, type MonthKey } from "@/lib/utils/month";
+import { currentMonthKey, type MonthKey } from "@/lib/utils/month";
 
 /** Doanh thu tính thù lao của đối tác trong một tháng, chia theo phụ lục áp dụng tháng đó. */
 export type PolicyMonthPoint = { month: MonthKey } & Record<ContractTier, number>;
 
+export type OverviewKpis = {
+  /** Doanh thu tính thù lao của đối tác (gồm doanh số nhân viên). */
+  baseRevenue: number;
+  /** Toàn bộ doanh thu qua link: đối tác, nhân viên, NVKD, mọi loại đơn. */
+  totalRevenue: number;
+  /** Phí/thù lao đối tác. */
+  payout: number;
+  /** Số đối tác có doanh thu trong tháng. */
+  activePartners: number;
+};
+
 export type AdminOverview = {
   month: MonthKey;
+  /** Các dòng bảng kê tháng hiện tại — để biểu đồ lịch sử dùng đúng số của các thẻ. */
+  rows: MonthlyPartnerRevenue[];
   counts: { partners: number; salesEmployees: number };
-  kpis: {
-    /** Doanh thu tính thù lao của đối tác (gồm doanh số nhân viên). */
-    baseRevenue: number;
-    /** Toàn bộ doanh thu qua link: đối tác, nhân viên, NVKD, mọi loại đơn. */
-    totalRevenue: number;
-    /** Phí/thù lao đối tác tạm tính. */
-    payout: number;
-  };
-  policyTrend: PolicyMonthPoint[];
+  kpis: OverviewKpis;
   /** Đối tác theo phụ lục đang hiệu lực (tháng hiện tại). */
   distribution: Array<{ tier: ContractTier; count: number; payout: number }>;
   leaders: Array<{
@@ -46,17 +49,41 @@ export function adminPartnerName(
   return info?.fullName || row.name?.trim() || row.username;
 }
 
-function emptyPoint(month: MonthKey): PolicyMonthPoint {
-  return { month, normal: 0, silver: 0, gold: 0, diamond: 0 };
+/** Các chỉ số đầu trang tổng quan, từ các dòng bảng kê của một tháng. */
+export function overviewKpis(rows: MonthlyPartnerRevenue[]): OverviewKpis {
+  const kpis: OverviewKpis = { baseRevenue: 0, totalRevenue: 0, payout: 0, activePartners: 0 };
+  for (const row of rows) {
+    kpis.totalRevenue += row.revenue;
+    if (row.partnerType !== "collaborator") continue;
+    kpis.baseRevenue += row.remuneration.revenue;
+    kpis.payout += payableAmount(row.remuneration);
+    if (row.revenue > 0) kpis.activePartners += 1;
+  }
+  return kpis;
 }
 
+/**
+ * Doanh thu tính thù lao của đối tác theo phụ lục của từng tháng (đã gồm doanh số nhân viên),
+ * từ các dòng bảng kê nhiều tháng (getRecentRevenueRows).
+ */
+export function policyTrendFrom(
+  history: Map<MonthKey, MonthlyPartnerRevenue[]>,
+  months: MonthKey[],
+): PolicyMonthPoint[] {
+  return months.map((month) => {
+    const point: PolicyMonthPoint = { month, normal: 0, silver: 0, gold: 0, diamond: 0 };
+    for (const row of history.get(month) ?? []) {
+      if (row.partnerType === "collaborator") point[row.tier] += row.remuneration.revenue;
+    }
+    return point;
+  });
+}
+
+/** Số liệu tháng hiện tại. Lịch sử (biểu đồ) lấy riêng để trang hiện trước rồi stream sau. */
 export async function getAdminOverview(): Promise<AdminOverview> {
   const month = currentMonthKey();
-  const months = recentMonths(month, 6);
-  const [report, breakdowns, tierHistory, paymentInfo, staffCounts, staffStats, pendingApps] = await Promise.all([
+  const [report, paymentInfo, staffCounts, staffStats, pendingApps] = await Promise.all([
     getMonthlyRevenueReport({ month }),
-    getRevenueBreakdowns({ start: monthRange(months[0]).start, end: monthRange(month).end }),
-    getContractTierHistory(months),
     getPartnerPaymentInfoMap(),
     countActiveStaffByPartner(),
     getStaffStats(),
@@ -66,17 +93,6 @@ export async function getAdminOverview(): Promise<AdminOverview> {
   const partners = report.rows.filter((r) => r.partnerType === "collaborator");
   const nameOf = (r: MonthlyPartnerRevenue) => adminPartnerName(r, paymentInfo.get(r.partnerId));
   const payable = (r: MonthlyPartnerRevenue) => payableAmount(r.remuneration);
-  const isPartner = new Set(partners.map((r) => r.partnerId));
-
-  // Doanh thu tính thù lao 6 tháng theo phụ lục của từng tháng (đã gồm doanh số nhân viên).
-  const trend = new Map<MonthKey, PolicyMonthPoint>(months.map((m) => [m, emptyPoint(m)]));
-  for (const row of breakdowns) {
-    const point = trend.get(row.month);
-    if (!point || !isPartner.has(row.partnerId)) continue;
-    const tier = tierInMonth(tierHistory, row.partnerId, row.month);
-    const remuneration = calcPartnerRemuneration("collaborator", tier, remunerationBase(row.breakdown));
-    point[tier] += remuneration.revenue;
-  }
 
   const counted = partners.filter((r) => r.isActive || payable(r) > 0);
   const distribution = CONTRACT_TIERS.map((tier) => {
@@ -117,12 +133,8 @@ export async function getAdminOverview(): Promise<AdminOverview> {
       partners: partners.filter((r) => r.isActive).length,
       salesEmployees: report.rows.filter((r) => r.partnerType === "sales_employee" && r.isActive).length,
     },
-    kpis: {
-      baseRevenue: partners.reduce((s, r) => s + r.remuneration.revenue, 0),
-      totalRevenue: report.totals.revenue,
-      payout: partners.reduce((s, r) => s + payable(r), 0),
-    },
-    policyTrend: months.map((m) => trend.get(m) ?? emptyPoint(m)),
+    rows: report.rows,
+    kpis: overviewKpis(report.rows),
     distribution,
     leaders,
     missingInfo,

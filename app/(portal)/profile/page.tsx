@@ -92,7 +92,7 @@ export default async function ProfilePage() {
 
   const contract = await getPortalContract(partnerId);
   const isCollaborator = summary?.partnerType !== "sales_employee";
-  const missing = [!summary?.bankAccountNumber && "số tài khoản", !summary?.taxCode && "mã số thuế"].filter(Boolean);
+  const missing = summary?.bankAccountNumber ? [] : ["số tài khoản"];
 
   return (
     <div className="flex flex-col gap-6">

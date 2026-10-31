@@ -13,7 +13,7 @@ import {
 } from "@/lib/commission";
 import { getContractsForMonth } from "@/lib/data/contracts";
 import { listPartners } from "@/lib/data/partners";
-import { formatNumber, formatPercent, formatShortVND } from "@/lib/utils/currency";
+import { formatNumber, formatPercent, formatShortVND, formatVND } from "@/lib/utils/currency";
 import { currentMonthKey } from "@/lib/utils/month";
 
 export const metadata = { title: "Biểu phụ lục" };
@@ -133,7 +133,7 @@ export default async function AdminTiersPage() {
                       return (
                         <td key={tier} className="num px-3 py-2.5 text-right last:pr-5">
                           <span className="flex flex-col items-end">
-                            <span className="font-semibold">{formatShortVND(r.commission + r.performanceBonus)}</span>
+                            <span className="font-semibold">{formatVND(r.commission + r.performanceBonus)}</span>
                             <span className="text-xs text-muted-foreground">{formatPercent(r.effectiveRate)}</span>
                           </span>
                         </td>

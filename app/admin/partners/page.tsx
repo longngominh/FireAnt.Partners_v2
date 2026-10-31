@@ -20,7 +20,7 @@ import { listPartners } from "@/lib/data/partners";
 import { getMonthlyRevenueReport } from "@/lib/data/revenue";
 import { countActiveStaffByPartner } from "@/lib/data/staff";
 import { cn } from "@/lib/utils";
-import { formatNumber, formatShortVND } from "@/lib/utils/currency";
+import { formatNumber, formatVND } from "@/lib/utils/currency";
 import { currentMonthKey, formatMonthStart, parseMonthKey } from "@/lib/utils/month";
 import { PartnerDetailLink } from "./partner-detail-link";
 
@@ -273,7 +273,7 @@ export default async function AdminPartnersPage({ searchParams }: { searchParams
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] border-collapse text-sm">
             <thead>
-              <tr className="bg-muted/40 text-xs text-muted-foreground">
+              <tr className="whitespace-nowrap bg-muted/40 text-xs text-muted-foreground">
                 <th className="px-5 py-3 text-left font-semibold">{isPartnerTab ? "Đối tác" : "Nhân viên kinh doanh"}</th>
                 <th className="px-3 py-3 text-left font-semibold">{isPartnerTab ? "Chính sách hiện hành" : "Chế độ"}</th>
                 <th className="px-3 py-3 text-right font-semibold">Nhân viên</th>
@@ -331,14 +331,14 @@ export default async function AdminPartnersPage({ searchParams }: { searchParams
                   <td className="num px-3 py-3 text-right">{isPartnerTab ? formatNumber(r.staff) : "—"}</td>
                   <td className="num px-3 py-3 text-right">
                     <span className="flex flex-col items-end">
-                      <span className="font-semibold">{formatShortVND(r.base)}</span>
+                      <span className="font-semibold">{formatVND(r.base)}</span>
                       <span className="text-xs text-muted-foreground">{r.tierPolicy ? "khách mới" : "gói hội viên"}</span>
                     </span>
                   </td>
                   <td className="num px-3 py-3 text-right">
                     <span className="flex flex-col items-end">
-                      <span className="font-semibold text-success">{formatShortVND(r.payout)}</span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="font-semibold text-success">{formatVND(r.payout)}</span>
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">
                         {isPartnerTab ? contractTierScheme(r.tier) : "+ lương cứng"}
                       </span>
                     </span>

@@ -92,7 +92,7 @@ export async function PartnerOverview({ summary, name }: { summary: PartnerSumma
         />
         <StatCard
           label={current.remuneration.policy === "tier" ? "Doanh thu tính thù lao" : "Doanh số tính thù lao"}
-          value={formatShortVND(base)}
+          value={formatVND(base)}
           hint={
             current.remuneration.policy === "tier"
               ? `Khách mua gói hội viên lần đầu · chưa tính ${formatShortVND(otherRevenue(current.total))} gia hạn, khác`
@@ -101,7 +101,7 @@ export async function PartnerOverview({ summary, name }: { summary: PartnerSumma
         />
         <StatCard
           label="Phí/thù lao tạm tính"
-          value={formatShortVND(payout)}
+          value={formatVND(payout)}
           tone="success"
           href="/earnings"
           hint={`${contractTierScheme(current.tier)} · hiệu dụng ${formatPercent(current.remuneration.effectiveRate)}`}
@@ -267,7 +267,7 @@ async function PartnerTodos({ summary, expiringSoon }: { summary: PartnerSummary
     listStaffApplications({ partnerId: summary.partnerId, status: "pending" }),
     countPaidOrdersWithoutAccount(null, summary.partnerId),
   ]);
-  const missingInfo = !summary.bankAccountNumber || !summary.taxCode;
+  const missingInfo = !summary.bankAccountNumber;
   const items = [
     proposals.length > 0 && {
       href: "/team?tab=proposals",
@@ -287,7 +287,7 @@ async function PartnerTodos({ summary, expiringSoon }: { summary: PartnerSummary
     missingInfo && {
       href: "/profile",
       title: "Thiếu thông tin chi trả",
-      desc: !summary.bankAccountNumber ? "Chưa có số tài khoản nhận thù lao." : "Chưa cập nhật mã số thuế.",
+      desc: "Chưa có số tài khoản nhận thù lao.",
     },
   ].filter(Boolean) as { href: string; title: string; desc: string }[];
 

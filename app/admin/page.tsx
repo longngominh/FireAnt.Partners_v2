@@ -2,19 +2,91 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { ChevronRightIcon, UserPlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HistoryChart, HistoryChartSkeleton } from "@/components/shared/history-chart";
+import { KpiDelta, KpiDeltaSkeleton } from "@/components/shared/kpi-delta";
 import { PageHeader } from "@/components/shared/page-header";
 import { Panel, PanelLink, StatCard } from "@/components/shared/panel";
 import { TierStackChart, type TierStackPoint } from "@/components/features/tiers/tier-stack-chart";
 import { TIER_CLASSES, TierBadge } from "@/components/features/tiers/tier-ui";
 import { requireAdminSession } from "@/lib/auth/session";
 import { CONTRACT_TIER_LABELS } from "@/lib/commission";
-import { getAdminOverview } from "@/lib/data/admin-overview";
+import { getAdminOverview, overviewKpis, policyTrendFrom, type OverviewKpis } from "@/lib/data/admin-overview";
 import { countPaidOrdersWithoutAccount } from "@/lib/data/pending-accounts";
+import {
+  getRecentRevenueRows,
+  getRevenueHistory,
+  recentMonths,
+  withLiveMonth,
+  type MonthlyPartnerRevenue,
+} from "@/lib/data/revenue";
 import { cn } from "@/lib/utils";
-import { formatNumber, formatPercent, formatShortVND } from "@/lib/utils/currency";
-import { formatDay, parseMonthKey } from "@/lib/utils/month";
+import { formatNumber, formatPercent, formatShortVND, formatVND } from "@/lib/utils/currency";
+import { currentMonthKey, formatDay, parseMonthKey, shiftMonth, type MonthKey } from "@/lib/utils/month";
 
 export const metadata = { title: "Tổng quan hệ thống" };
+
+type History = Promise<Map<MonthKey, MonthlyPartnerRevenue[]>>;
+
+/** So với tháng trước ở đáy thẻ: chỉ cần một tháng nên không chờ cả lịch sử. */
+async function OverviewDelta({
+  previous,
+  month,
+  live,
+  pick,
+  upIsGood,
+}: {
+  previous: History;
+  month: MonthKey;
+  live: OverviewKpis;
+  pick: (kpis: OverviewKpis) => number;
+  upIsGood?: boolean;
+}) {
+  const rows = await previous;
+  const prev = overviewKpis(rows.get(shiftMonth(month, -1)) ?? []);
+  return <KpiDelta month={month} value={pick(live)} previous={pick(prev)} open upIsGood={upIsGood} />;
+}
+
+async function OverviewHistory({ history, month }: { history: History; month: MonthKey }) {
+  const rows = await history;
+  const months = Array.from(rows.keys());
+  const kpis = months.map((m) => overviewKpis(rows.get(m) ?? []));
+  return (
+    <HistoryChart
+      months={months}
+      selected={month}
+      openMonth={month}
+      hrefs={months.map((m) => `/admin/payouts?month=${m}`)}
+      series={[
+        { key: "base", label: "Doanh thu tính thù lao", unit: "vnd", values: kpis.map((k) => k.baseRevenue) },
+        { key: "total", label: "Tổng doanh thu qua link", unit: "vnd", values: kpis.map((k) => k.totalRevenue) },
+        {
+          key: "payout",
+          label: "Phí/thù lao đối tác",
+          unit: "vnd",
+          values: kpis.map((k) => k.payout),
+          upIsGood: false,
+        },
+        { key: "partners", label: "Đối tác có doanh thu", unit: "count", values: kpis.map((k) => k.activePartners) },
+      ]}
+    />
+  );
+}
+
+async function PolicyTrend({ history, month }: { history: History; month: MonthKey }) {
+  const rows = await history;
+  const data: TierStackPoint[] = policyTrendFrom(rows, recentMonths(month, 6)).map((p) => {
+    const { month: m, year: y } = parseMonthKey(p.month);
+    return {
+      label: `T${m}`,
+      title: `Tháng ${m}/${y}${p.month === month ? " · tạm tính" : ""}`,
+      normal: p.normal,
+      silver: p.silver,
+      gold: p.gold,
+      diamond: p.diamond,
+    };
+  });
+  return <TierStackChart data={data} />;
+}
 
 async function PendingAccountsAction() {
   const count = await countPaidOrdersWithoutAccount(null);
@@ -66,21 +138,19 @@ function ActionRow({
 
 export default async function AdminOverviewPage() {
   await requireAdminSession();
+  // Lịch sử và tháng trước chạy song song với số tháng này; thẻ hiện ngay, biểu đồ stream sau.
+  const now = currentMonthKey();
+  const historyRows = getRevenueHistory();
+  const previous = getRecentRevenueRows([shiftMonth(now, -1)]);
   const data = await getAdminOverview();
+  const history = historyRows.then((rows) => withLiveMonth(rows, data.month, data.rows));
   const { month: monthNumber, year } = parseMonthKey(data.month);
   const totalPartners = data.distribution.reduce((s, d) => s + d.count, 0);
-
-  const trend: TierStackPoint[] = data.policyTrend.map((p) => {
-    const { month: m, year: y } = parseMonthKey(p.month);
-    return {
-      label: `T${m}`,
-      title: `Tháng ${m}/${y}${p.month === data.month ? " · tạm tính" : ""}`,
-      normal: p.normal,
-      silver: p.silver,
-      gold: p.gold,
-      diamond: p.diamond,
-    };
-  });
+  const trendOf = (pick: (kpis: OverviewKpis) => number, upIsGood = true) => (
+    <Suspense fallback={<KpiDeltaSkeleton />}>
+      <OverviewDelta previous={previous} month={data.month} live={data.kpis} pick={pick} upIsGood={upIsGood} />
+    </Suspense>
+  );
 
   const pendingHint =
     data.pending.count > 0
@@ -114,15 +184,17 @@ export default async function AdminOverviewPage() {
           label="Doanh thu tính thù lao"
           value={formatShortVND(data.kpis.baseRevenue)}
           hint="Theo chính sách của từng đối tác, gồm doanh số nhân viên"
+          trend={trendOf((k) => k.baseRevenue)}
         />
         <StatCard
           label="Tổng doanh thu qua link"
           value={formatShortVND(data.kpis.totalRevenue)}
           hint="Gồm gia hạn, nâng cấp và NVKD"
+          trend={trendOf((k) => k.totalRevenue)}
         />
         <StatCard
           label="Phí/thù lao tạm tính"
-          value={formatShortVND(data.kpis.payout)}
+          value={formatVND(data.kpis.payout)}
           hint={
             data.kpis.baseRevenue > 0
               ? `${formatPercent(data.kpis.payout / data.kpis.baseRevenue)} doanh thu tính thù lao`
@@ -130,6 +202,7 @@ export default async function AdminOverviewPage() {
           }
           tone="success"
           href="/admin/payouts"
+          trend={trendOf((k) => k.payout, false)}
         />
         <StatCard
           label="Nhân viên bán hàng"
@@ -146,13 +219,19 @@ export default async function AdminOverviewPage() {
         />
       </div>
 
+      <Suspense fallback={<HistoryChartSkeleton />}>
+        <OverviewHistory history={history} month={data.month} />
+      </Suspense>
+
       <div className="grid gap-5 lg:grid-cols-12">
         <Panel
           className="lg:col-span-7"
           title="Doanh thu tính thù lao theo chính sách hợp đồng"
           description="6 tháng gần nhất · gồm doanh số của nhân viên · mỗi đối tác tính theo phụ lục của tháng đó"
         >
-          <TierStackChart data={trend} />
+          <Suspense fallback={<div aria-hidden className="h-[292px] animate-pulse rounded-xl bg-muted/50" />}>
+            <PolicyTrend history={history} month={data.month} />
+          </Suspense>
         </Panel>
 
         <Panel
@@ -177,16 +256,16 @@ export default async function AdminOverviewPage() {
               )}
             </div>
             <div className="flex flex-col">
-              <div className="grid grid-cols-[1fr_64px_96px] gap-2 pb-2 text-xs text-muted-foreground">
+              <div className="grid grid-cols-[1fr_64px_120px] gap-2 pb-2 text-xs text-muted-foreground">
                 <span>Chính sách</span>
                 <span className="text-right">Đối tác</span>
                 <span className="text-right">Phí T{monthNumber}</span>
               </div>
               {[...data.distribution].reverse().map((d) => (
-                <div key={d.tier} className="grid grid-cols-[1fr_64px_96px] items-center gap-2 border-t py-2.5 text-sm">
+                <div key={d.tier} className="grid grid-cols-[1fr_64px_120px] items-center gap-2 border-t py-2.5 text-sm">
                   <TierBadge tier={d.tier} />
                   <span className="num text-right font-semibold">{d.count}</span>
-                  <span className="num text-right text-muted-foreground">{formatShortVND(d.payout)}</span>
+                  <span className="num text-right text-muted-foreground">{formatVND(d.payout)}</span>
                 </div>
               ))}
             </div>

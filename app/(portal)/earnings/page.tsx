@@ -121,7 +121,7 @@ export default async function EarningsPage({
               </div>
               <div className="flex flex-col gap-1 rounded-xl border bg-muted/30 px-4 py-3">
                 <span className="text-[13px] text-muted-foreground">{isTier ? "Doanh thu tính thù lao" : "Doanh số tính thù lao"}</span>
-                <span className="num text-2xl font-bold">{formatShortVND(base)}</span>
+                <span className="num text-2xl font-bold">{formatVND(base)}</span>
                 <span className="text-xs text-muted-foreground">
                   {isTier
                     ? `Khách mua gói hội viên lần đầu · ${selected.total.new.customers} khách`
@@ -192,7 +192,7 @@ export default async function EarningsPage({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-sm">
             <thead>
-              <tr className="bg-muted/40 text-xs text-muted-foreground">
+              <tr className="whitespace-nowrap bg-muted/40 text-xs text-muted-foreground">
                 <th className="px-5 py-2.5 text-left font-semibold">Tháng</th>
                 <th className="px-3 py-2.5 text-left font-semibold">{isCollaborator ? "Phụ lục" : "Chế độ"}</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Tổng doanh thu</th>
@@ -211,12 +211,10 @@ export default async function EarningsPage({
                   <td className="px-3 py-3">
                     {isCollaborator ? <TierBadge tier={m.tier} /> : PARTNER_TYPE_LABELS[partnerType]}
                   </td>
-                  <td className="num px-3 py-3 text-right">{formatShortVND(m.total.total.revenue)}</td>
-                  <td className="num px-3 py-3 text-right text-muted-foreground">{formatShortVND(m.staff.total.revenue)}</td>
-                  <td className="num px-3 py-3 text-right">
-                    {formatShortVND(m.remuneration.revenue)}
-                  </td>
-                  <td className="num px-5 py-3 text-right font-semibold">{formatShortVND(payableAmount(m.remuneration))}</td>
+                  <td className="num px-3 py-3 text-right">{formatVND(m.total.total.revenue)}</td>
+                  <td className="num px-3 py-3 text-right text-muted-foreground">{formatVND(m.staff.total.revenue)}</td>
+                  <td className="num px-3 py-3 text-right">{formatVND(m.remuneration.revenue)}</td>
+                  <td className="num px-5 py-3 text-right font-semibold">{formatVND(payableAmount(m.remuneration))}</td>
                 </tr>
               ))}
             </tbody>

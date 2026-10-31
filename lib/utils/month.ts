@@ -81,3 +81,11 @@ export function formatDay(date: Date | null | undefined): string {
 export function recentMonthKeys(lastMonth: MonthKey, count: number): MonthKey[] {
   return Array.from({ length: count }, (_, i) => shiftMonth(lastMonth, i - count + 1));
 }
+
+/** Các tháng từ `from` tới `to` (cả hai đầu, cũ → mới); rỗng khi `from` sau `to`. */
+export function monthsBetween(from: MonthKey, to: MonthKey): MonthKey[] {
+  const a = parseMonthKey(from);
+  const b = parseMonthKey(to);
+  const count = (b.year - a.year) * 12 + (b.month - a.month) + 1;
+  return count > 0 ? recentMonthKeys(to, count) : [];
+}

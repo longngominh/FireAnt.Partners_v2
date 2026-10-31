@@ -56,6 +56,7 @@ export function StatCard({
   hint,
   tone = "default",
   href,
+  trend,
   className,
 }: {
   label: string;
@@ -63,6 +64,8 @@ export function StatCard({
   hint?: React.ReactNode;
   tone?: "default" | "success" | "warning";
   href?: string;
+  /** Dòng so sánh với tháng trước (KpiDelta), luôn nằm đáy thẻ. */
+  trend?: React.ReactNode;
   className?: string;
 }) {
   const body = (
@@ -78,6 +81,7 @@ export function StatCard({
         {value}
       </span>
       {hint ? <span className="text-[13px] leading-5 text-muted-foreground">{hint}</span> : null}
+      {trend ? <div className="mt-auto pt-2">{trend}</div> : null}
     </>
   );
   const cls = cn(

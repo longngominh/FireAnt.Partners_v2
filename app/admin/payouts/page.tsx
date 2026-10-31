@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HistoryChart, HistoryChartSkeleton, type HistorySeries } from "@/components/shared/history-chart";
+import { KpiDelta, KpiDeltaSkeleton } from "@/components/shared/kpi-delta";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/panel";
 import { TierBadge, TierDot } from "@/components/features/tiers/tier-ui";
@@ -18,15 +21,24 @@ import {
 } from "@/lib/commission";
 import { payableAmount } from "@/lib/earnings/explain";
 import { getPartnerPaymentInfoMap, missingPaymentFields } from "@/lib/data/partner-payment-info";
-import { getMonthlyRevenueReport, sumMonthlyTotals, type MonthlyPartnerRevenue } from "@/lib/data/revenue";
+import {
+  getMonthlyRevenueReport,
+  getRecentRevenueRows,
+  getRevenueHistory,
+  sumMonthlyTotals,
+  withLiveMonth,
+  type MonthlyPartnerRevenue,
+} from "@/lib/data/revenue";
 import { cn } from "@/lib/utils";
-import { formatNumber, formatPercent, formatShortVND } from "@/lib/utils/currency";
+import { formatNumber, formatPercent, formatVND } from "@/lib/utils/currency";
 import {
   currentMonthKey,
   formatMonthLabel,
   formatMonthRangeLabel,
   normalizeMonthKey,
   parseMonthKey,
+  shiftMonth,
+  type MonthKey,
 } from "@/lib/utils/month";
 
 export const metadata = { title: "Thù lao & chi trả" };
@@ -43,9 +55,109 @@ type PayoutRow = MonthlyPartnerRevenue & {
   payable: number;
   bankName: string | null;
   legalType: "individual" | "company";
-  /** Có phí/thù lao nhưng thiếu số tài khoản hoặc mã số thuế. */
+  /** Có phí/thù lao nhưng thiếu số tài khoản. */
   missing: string[];
 };
+
+type GroupSummary = {
+  payable: number;
+  base: number;
+  revenue: number;
+  staff: number;
+  baseSalary: number;
+  /** Số người có phí/thù lao. */
+  earners: number;
+};
+
+/** Tổng của một nhóm trong một tháng — cùng cách lọc với bảng: chỉ người có doanh số hoặc phí/thù lao. */
+function summarize(rows: MonthlyPartnerRevenue[], group: Group): GroupSummary {
+  const summary: GroupSummary = { payable: 0, base: 0, revenue: 0, staff: 0, baseSalary: 0, earners: 0 };
+  for (const row of rows) {
+    if (row.partnerType !== (group === "nvkd" ? "sales_employee" : "collaborator")) continue;
+    const payable = payableAmount(row.remuneration);
+    if (row.revenue <= 0 && payable <= 0) continue;
+    summary.payable += payable;
+    summary.base += row.remuneration.revenue;
+    summary.revenue += row.revenue;
+    summary.staff += row.staffRevenue;
+    summary.baseSalary += row.remuneration.baseSalary;
+    if (payable > 0) summary.earners += 1;
+  }
+  return summary;
+}
+
+type MonthRows = Promise<Map<MonthKey, MonthlyPartnerRevenue[]>>;
+
+/** So với tháng trước ở đáy thẻ: chỉ cần một tháng nên không chờ cả lịch sử. */
+async function GroupDelta({
+  previous,
+  group,
+  month,
+  live,
+  pick,
+  upIsGood,
+}: {
+  previous: MonthRows;
+  group: Group;
+  month: MonthKey;
+  live: GroupSummary;
+  pick: (summary: GroupSummary) => number;
+  upIsGood?: boolean;
+}) {
+  const rows = await previous;
+  const prev = summarize(rows.get(shiftMonth(month, -1)) ?? [], group);
+  return (
+    <KpiDelta
+      month={month}
+      value={pick(live)}
+      previous={pick(prev)}
+      open={month === currentMonthKey()}
+      upIsGood={upIsGood}
+    />
+  );
+}
+
+/** Lịch sử các chỉ số của nhóm đang xem, từ tháng đầu tiên có đơn qua link. */
+async function GroupHistory({
+  history,
+  group,
+  month,
+  monthHref,
+}: {
+  history: MonthRows;
+  group: Group;
+  month: MonthKey;
+  monthHref: (month: MonthKey) => string;
+}) {
+  const rows = await history;
+  const months = Array.from(rows.keys());
+  const sums = months.map((m) => summarize(rows.get(m) ?? [], group));
+  const values = (pick: (s: GroupSummary) => number) => sums.map(pick);
+  const series: HistorySeries[] =
+    group === "partner"
+      ? [
+          { key: "payable", label: "Phí/thù lao đối tác", unit: "vnd", values: values((s) => s.payable), upIsGood: false },
+          { key: "base", label: "Doanh thu tính thù lao", unit: "vnd", values: values((s) => s.base) },
+          { key: "staff", label: "Doanh thu từ nhân viên", unit: "vnd", values: values((s) => s.staff) },
+          { key: "earners", label: "Đối tác có phí/thù lao", unit: "count", values: values((s) => s.earners) },
+        ]
+      : [
+          { key: "payable", label: "Hoa hồng NVKD", unit: "vnd", values: values((s) => s.payable), upIsGood: false },
+          { key: "base", label: "Doanh thu tính thù lao", unit: "vnd", values: values((s) => s.base) },
+          { key: "salary", label: "Lương cứng", unit: "vnd", values: values((s) => s.baseSalary), upIsGood: false },
+        ];
+  return (
+    <HistoryChart
+      // Đổi tab thì dựng lại để chọn lại chỉ số đầu của nhóm.
+      key={group}
+      months={months}
+      series={series}
+      selected={month}
+      openMonth={currentMonthKey()}
+      hrefs={months.map(monthHref)}
+    />
+  );
+}
 
 function initialsOf(name: string): string {
   return name
@@ -70,7 +182,13 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
   const missingOnly = params.missing === "1";
   const q = (params.q ?? "").trim();
 
+  const now = currentMonthKey();
+  // Lịch sử và tháng trước chạy song song với bảng kê; thẻ và bảng hiện ngay, biểu đồ stream sau.
+  const historyRows = getRevenueHistory();
+  const previous = getRecentRevenueRows([shiftMonth(month, -1)]);
+
   const [report, paymentInfo] = await Promise.all([getMonthlyRevenueReport({ month }), getPartnerPaymentInfoMap()]);
+  const history = historyRows.then((rows) => withLiveMonth(rows, month, report.rows));
 
   const all: PayoutRow[] = report.rows
     .map((row) => {
@@ -106,10 +224,7 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
   const totals = sumMonthlyTotals(rows);
 
   const sum = (list: PayoutRow[], pick: (r: PayoutRow) => number) => list.reduce((s, r) => s + pick(r), 0);
-  const groupPayable = sum(inGroup, (r) => r.payable);
-  const groupBase = sum(inGroup, (r) => r.remuneration.revenue);
-  const groupRevenue = sum(inGroup, (r) => r.revenue);
-  const groupStaff = sum(inGroup, (r) => r.staffRevenue);
+  const live = summarize(report.rows, group);
   const missingCount = inGroup.filter((r) => r.missing.length > 0).length;
   const tierCounts = Object.fromEntries(
     CONTRACT_TIERS.map((t) => [t, inGroup.filter((r) => r.tier === t).length]),
@@ -126,7 +241,18 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
     }
     return `${BASE_PATH}?${sp.toString()}`;
   };
-  const isCurrentMonth = month === currentMonthKey();
+  // Bấm cột lịch sử = đổi tháng như MonthPicker: giữ tab và ô tìm, bỏ bộ lọc phụ lục/thiếu thông tin.
+  const monthHref = (m: MonthKey) => {
+    const sp = new URLSearchParams({ month: m });
+    for (const [k, v] of Object.entries(keep)) if (v) sp.set(k, v);
+    return `${BASE_PATH}?${sp.toString()}`;
+  };
+  const trendOf = (pick: (summary: GroupSummary) => number, upIsGood = true) => (
+    <Suspense fallback={<KpiDeltaSkeleton />}>
+      <GroupDelta previous={previous} group={group} month={month} live={live} pick={pick} upIsGood={upIsGood} />
+    </Suspense>
+  );
+  const isCurrentMonth = month === now;
   const monthTag = `T${parseMonthKey(month).month}`;
   const partnerCount = all.filter((r) => r.partnerType === "collaborator").length;
   const nvkdCount = all.length - partnerCount;
@@ -180,34 +306,42 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard
           label={isPartners ? "Phí/thù lao đối tác" : "Hoa hồng NVKD"}
-          value={<span className="num">{formatShortVND(groupPayable)}</span>}
-          hint={`${formatNumber(inGroup.filter((r) => r.payable > 0).length)} người · hiệu dụng ${
-            groupBase > 0 ? formatPercent(groupPayable / groupBase) : "—"
+          value={formatVND(live.payable)}
+          hint={`${formatNumber(live.earners)} người · hiệu dụng ${
+            live.base > 0 ? formatPercent(live.payable / live.base) : "—"
           } doanh thu tính thù lao`}
+          trend={trendOf((s) => s.payable, false)}
         />
         <StatCard
           label="Doanh thu tính thù lao"
-          value={<span className="num">{formatShortVND(groupBase)}</span>}
+          value={formatVND(live.base)}
           hint={
-            groupRevenue > groupBase
-              ? `Trong tổng ${formatShortVND(groupRevenue)} · gia hạn, nâng cấp của phụ lục chưa tính; khóa học thanh toán riêng`
-              : `Tổng doanh thu ${formatShortVND(groupRevenue)}`
+            live.revenue > live.base
+              ? `Trong tổng ${formatVND(live.revenue)} · gia hạn, nâng cấp của phụ lục chưa tính; khóa học thanh toán riêng`
+              : `Tổng doanh thu ${formatVND(live.revenue)}`
           }
+          trend={trendOf((s) => s.base)}
         />
         {isPartners ? (
           <StatCard
             label="Doanh thu từ nhân viên"
-            value={<span className="num">{formatShortVND(groupStaff)}</span>}
-            hint={groupRevenue > 0 ? `${formatPercent(groupStaff / groupRevenue)} doanh thu đối tác` : "Chưa có doanh thu"}
+            value={formatVND(live.staff)}
+            hint={live.revenue > 0 ? `${formatPercent(live.staff / live.revenue)} doanh thu đối tác` : "Chưa có doanh thu"}
+            trend={trendOf((s) => s.staff)}
           />
         ) : (
           <StatCard
             label="Lương cứng"
-            value={<span className="num">{formatShortVND(sum(inGroup, (r) => r.remuneration.baseSalary))}</span>}
+            value={formatVND(live.baseSalary)}
             hint="Trả qua bảng lương, không nằm trong giấy đề nghị"
+            trend={trendOf((s) => s.baseSalary, false)}
           />
         )}
       </div>
+
+      <Suspense fallback={<HistoryChartSkeleton />}>
+        <GroupHistory history={history} group={group} month={month} monthHref={monthHref} />
+      </Suspense>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1.5">
@@ -261,7 +395,7 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
         <div className="overflow-x-auto">
           <table className={cn("w-full border-collapse text-sm", isPartners ? "min-w-[1040px]" : "min-w-[760px]")}>
             <thead>
-              <tr className="bg-muted/40 text-xs text-muted-foreground">
+              <tr className="whitespace-nowrap bg-muted/40 text-xs text-muted-foreground">
                 <th className="px-5 py-3 text-left font-semibold">{isPartners ? "Đối tác" : "Nhân viên kinh doanh"}</th>
                 {isPartners ? (
                   <>
@@ -313,22 +447,22 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
                         <td className="px-3 py-3">
                           <TierBadge tier={r.tier} />
                         </td>
-                        <td className="num px-3 py-3 text-right">{formatShortVND(r.directRevenue)}</td>
+                        <td className="num px-3 py-3 text-right">{formatVND(r.directRevenue)}</td>
                         <td className="num px-3 py-3 text-right">
-                          {r.staffRevenue > 0 ? formatShortVND(r.staffRevenue) : <span className="text-muted-foreground">—</span>}
+                          {r.staffRevenue > 0 ? formatVND(r.staffRevenue) : <span className="text-muted-foreground">—</span>}
                         </td>
                       </>
                     ) : null}
                     <td className="num px-3 py-3 text-right">
                       <span className="flex flex-col items-end">
-                        <span className="font-semibold">{formatShortVND(rem.revenue)}</span>
+                        <span className="font-semibold">{formatVND(rem.revenue)}</span>
                         <span className="text-xs text-muted-foreground">{rem.policy === "tier" ? "khách mới" : "gói hội viên"}</span>
                       </span>
                     </td>
                     <td className="num px-3 py-3 text-right">
                       <span className="flex flex-col items-end">
-                        <span className="font-semibold text-success">{formatShortVND(r.payable)}</span>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="font-semibold text-success">{formatVND(r.payable)}</span>
+                        <span className="whitespace-nowrap text-xs text-muted-foreground">
                           {isPartners ? contractTierScheme(r.tier) : "Bậc NVKD"} · {formatPercent(rem.effectiveRate)}
                         </span>
                       </span>
@@ -366,12 +500,12 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
                   </td>
                   {isPartners ? (
                     <>
-                      <td className="num px-3 py-3 text-right">{formatShortVND(sum(rows, (r) => r.directRevenue))}</td>
-                      <td className="num px-3 py-3 text-right">{formatShortVND(sum(rows, (r) => r.staffRevenue))}</td>
+                      <td className="num px-3 py-3 text-right">{formatVND(sum(rows, (r) => r.directRevenue))}</td>
+                      <td className="num px-3 py-3 text-right">{formatVND(sum(rows, (r) => r.staffRevenue))}</td>
                     </>
                   ) : null}
-                  <td className="num px-3 py-3 text-right">{formatShortVND(sum(rows, (r) => r.remuneration.revenue))}</td>
-                  <td className="num px-3 py-3 text-right text-success">{formatShortVND(sum(rows, (r) => r.payable))}</td>
+                  <td className="num px-3 py-3 text-right">{formatVND(sum(rows, (r) => r.remuneration.revenue))}</td>
+                  <td className="num px-3 py-3 text-right text-success">{formatVND(sum(rows, (r) => r.payable))}</td>
                   <td className="px-5 py-3 text-[13px] font-normal text-muted-foreground">
                     {rows.filter((r) => r.missing.length > 0).length} thiếu thông tin
                   </td>

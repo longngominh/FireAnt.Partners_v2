@@ -8,7 +8,7 @@ import {
   type PartnerType,
   type RemunerationBreakdown,
 } from "@/lib/commission";
-import { getContractsForMonth, tierInMonth } from "@/lib/data/contracts";
+import { getContractsForMonth, getContractTierHistory, tierInMonth } from "@/lib/data/contracts";
 import {
   emptyBreakdown,
   getRevenueBreakdowns,
@@ -20,7 +20,14 @@ import {
   type OrderKind,
   type RevenueBreakdown,
 } from "@/lib/data/revenue-breakdown";
-import { monthRange, normalizeMonthKey, shiftMonth, type MonthKey } from "@/lib/utils/month";
+import {
+  currentMonthKey,
+  monthRange,
+  monthsBetween,
+  normalizeMonthKey,
+  shiftMonth,
+  type MonthKey,
+} from "@/lib/utils/month";
 
 export type MonthlyPartnerRevenue = {
   partnerId: number;
@@ -272,6 +279,137 @@ export async function getMonthlyRevenueReport({
     console.error("[getMonthlyRevenueReport]", err);
     return { month: normalizedMonth, start, end, rows: [], totals: sumMonthlyTotals([]) };
   }
+}
+
+/**
+ * Các dòng bảng kê của nhiều tháng liền nhau (`months` tăng dần) bằng một truy vấn doanh số —
+ * cùng cách tính với getMonthlyRevenueReport, mỗi tháng theo phụ lục của tháng đó. Dùng cho
+ * biểu đồ lịch sử; tháng lỗi/không có dữ liệu trả mảng rỗng.
+ */
+export async function getMonthlyRevenueRows(months: MonthKey[]): Promise<Map<MonthKey, MonthlyPartnerRevenue[]>> {
+  const result = new Map<MonthKey, MonthlyPartnerRevenue[]>(months.map((m) => [m, []]));
+  if (months.length === 0) return result;
+
+  try {
+    const [profiles, sellerRows, tiers] = await Promise.all([
+      listPartnerProfiles(),
+      getSellerBreakdowns({
+        start: monthRange(months[0]).start,
+        end: monthRange(months[months.length - 1]).end,
+        partnerId: null,
+      }),
+      getContractTierHistory(months),
+    ]);
+    const splits = new Map<string, SplitBreakdown>();
+    for (const row of sellerRows) {
+      const key = `${row.partnerId}|${row.month}`;
+      const split = splits.get(key) ?? { direct: emptyBreakdown(), staff: emptyBreakdown() };
+      if (row.sellerId === row.partnerId) split.direct = mergeBreakdowns(split.direct, row.breakdown);
+      else split.staff = mergeBreakdowns(split.staff, row.breakdown);
+      splits.set(key, split);
+    }
+    const empty: SplitBreakdown = { direct: emptyBreakdown(), staff: emptyBreakdown() };
+    for (const month of months) {
+      result.set(
+        month,
+        profiles.map((profile) =>
+          buildMonthlyRow(
+            profile,
+            splits.get(`${profile.partnerId}|${month}`) ?? empty,
+            tierInMonth(tiers, profile.partnerId, month),
+          ),
+        ),
+      );
+    }
+  } catch (err) {
+    console.error("[getMonthlyRevenueRows]", err);
+  }
+  return result;
+}
+
+const ROWS_CACHE_MS = 5 * 60_000;
+const rowsCache = new Map<string, { at: number; rows: Promise<Map<MonthKey, MonthlyPartnerRevenue[]>> }>();
+
+/**
+ * getMonthlyRevenueRows nhớ trong 5 phút, cho biểu đồ lịch sử ở trang quản trị: truy vấn 13 tháng
+ * mất vài giây, còn đổi tháng/tab vẫn dùng cùng khoảng. Số của tháng đang xem vẫn tính trực tiếp.
+ */
+export function getRecentRevenueRows(months: MonthKey[]): Promise<Map<MonthKey, MonthlyPartnerRevenue[]>> {
+  const key = months.join(",");
+  const now = Date.now();
+  for (const [k, entry] of rowsCache) {
+    if (now - entry.at >= ROWS_CACHE_MS) rowsCache.delete(k);
+  }
+  const hit = rowsCache.get(key);
+  if (hit) return hit.rows;
+
+  const rows = getMonthlyRevenueRows(months).then((result) => {
+    // Lỗi truy vấn cho mảng rỗng mọi tháng — bỏ khỏi bộ nhớ để lần sau thử lại.
+    if (Array.from(result.values()).every((list) => list.length === 0)) rowsCache.delete(key);
+    return result;
+  });
+  rowsCache.set(key, { at: now, rows });
+  return rows;
+}
+
+/** Quét lịch sử từ tháng này — trước đơn đầu tiên qua link đối tác (09/2021); tháng trống ở đầu bị bỏ. */
+const HISTORY_FROM: MonthKey = "2021-01";
+const HISTORY_FRESH_MS = 30 * 60_000;
+
+type HistoryRows = Map<MonthKey, MonthlyPartnerRevenue[]>;
+type HistoryEntry = { through: MonthKey; at: number; rows: Promise<HistoryRows>; refreshing: boolean };
+let closedHistory: HistoryEntry | null = null;
+
+async function loadClosedHistory(through: MonthKey): Promise<HistoryRows> {
+  const rows = await getMonthlyRevenueRows(monthsBetween(HISTORY_FROM, through));
+  const months = Array.from(rows.keys());
+  const first = months.findIndex((m) => rows.get(m)?.some((r) => r.revenue > 0));
+  return new Map(first < 0 ? [] : months.slice(first).map((m) => [m, rows.get(m) ?? []]));
+}
+
+/**
+ * Các tháng đã qua tới `through`. Truy vấn cả lịch sử mất hơn 10 giây nên nhớ 30 phút; hết hạn thì
+ * vẫn trả bản cũ trong lúc tính lại ở nền. Lỗi (Map rỗng) không được giữ lại.
+ */
+function getClosedHistory(through: MonthKey): Promise<HistoryRows> {
+  const entry = closedHistory;
+  if (entry && entry.through === through) {
+    if (Date.now() - entry.at >= HISTORY_FRESH_MS && !entry.refreshing) {
+      entry.refreshing = true;
+      void loadClosedHistory(through).then((rows) => {
+        if (rows.size > 0) closedHistory = { through, at: Date.now(), rows: Promise.resolve(rows), refreshing: false };
+        else entry.refreshing = false;
+      });
+    }
+    return entry.rows;
+  }
+  const created: HistoryEntry = { through, at: Date.now(), rows: loadClosedHistory(through), refreshing: false };
+  closedHistory = created;
+  void created.rows.then((rows) => {
+    if (rows.size === 0 && closedHistory === created) closedHistory = null;
+  });
+  return created.rows;
+}
+
+/** Thay dòng của `month` trong lịch sử bằng số vừa tính trên trang, để biểu đồ khớp các thẻ và bảng. */
+export function withLiveMonth(history: HistoryRows, month: MonthKey, rows: MonthlyPartnerRevenue[]): HistoryRows {
+  if (!history.has(month)) return history;
+  const result = new Map(history);
+  result.set(month, rows);
+  return result;
+}
+
+/**
+ * Toàn bộ lịch sử theo tháng tới tháng hiện tại, cho biểu đồ lịch sử ở trang quản trị: các tháng đã
+ * qua nhớ 30 phút, tháng hiện tại 5 phút. Số của tháng đang xem trên trang vẫn tính trực tiếp.
+ */
+export async function getRevenueHistory(): Promise<HistoryRows> {
+  const current = currentMonthKey();
+  const [closed, open] = await Promise.all([
+    getClosedHistory(shiftMonth(current, -1)),
+    getRecentRevenueRows([current]),
+  ]);
+  return new Map([...closed, ...open]);
 }
 
 export type PartnerMonthHistory = {

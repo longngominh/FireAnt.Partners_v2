@@ -25,7 +25,7 @@ type Props = {
   defaultRequesterName: string;
   payableCount: number;
   payableAmount: number;
-  /** Số người trong giấy đề nghị thiếu số tài khoản hoặc mã số thuế — nhắc bổ sung trước khi gửi kế toán. */
+  /** Số người trong giấy đề nghị thiếu số tài khoản — nhắc bổ sung trước khi gửi kế toán. */
   missingInfoCount?: number;
 };
 
@@ -104,7 +104,7 @@ export function PaymentRequestDialog({
               ? `${payableCount} người, tổng đề nghị thanh toán ${formatVND(payableAmount)} cho kỳ ${formatMonthRangeLabel(month)}. Gồm bảng đề nghị, giải thích cách tính và bảng kê đơn.`
               : "Không có ai phát sinh hoa hồng trong kỳ này."}
             {missingInfoCount > 0
-              ? ` ${missingInfoCount} người thiếu số tài khoản hoặc mã số thuế — bổ sung trước khi gửi kế toán.`
+              ? ` ${missingInfoCount} người thiếu số tài khoản — bổ sung trước khi gửi kế toán.`
               : null}
           </DialogDescription>
         </DialogHeader>

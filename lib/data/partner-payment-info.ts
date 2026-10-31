@@ -25,11 +25,9 @@ export function isMissingPaymentColumns(err: unknown): boolean {
   return err instanceof Error && /Invalid column name/i.test(err.message);
 }
 
-/** Thiếu số tài khoản hoặc mã số thuế: chưa đủ thông tin để FireAnt lập chứng từ chi trả. */
+/** Thiếu số tài khoản: chưa chuyển được phí/thù lao. Mã số thuế không bắt buộc. */
 export function missingPaymentFields(info: PartnerPaymentInfo | null | undefined): string[] {
-  return [!info?.bankAccountNumber && "số tài khoản", !info?.taxCode && "mã số thuế"].filter(
-    (v): v is string => Boolean(v),
-  );
+  return info?.bankAccountNumber ? [] : ["số tài khoản"];
 }
 
 type Row = {
