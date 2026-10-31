@@ -1,12 +1,26 @@
 import { getPool, sql } from "@/lib/db/sql";
 import {
-  calcMonthlyRemuneration,
+  calcPartnerRemuneration,
   normalizePartnerType,
+  PARTNER_STAFF_TYPE,
   PARTNER_TYPE_LABELS,
+  type ContractTier,
   type PartnerType,
   type RemunerationBreakdown,
 } from "@/lib/commission";
-import { monthRange, normalizeMonthKey, type MonthKey } from "@/lib/utils/month";
+import { getContractsForMonth, tierInMonth } from "@/lib/data/contracts";
+import {
+  emptyBreakdown,
+  getRevenueBreakdowns,
+  getSellerBreakdowns,
+  listClassifiedOrders,
+  mergeBreakdowns,
+  otherRevenue,
+  remunerationBase,
+  type OrderKind,
+  type RevenueBreakdown,
+} from "@/lib/data/revenue-breakdown";
+import { monthRange, normalizeMonthKey, shiftMonth, type MonthKey } from "@/lib/utils/month";
 
 export type MonthlyPartnerRevenue = {
   partnerId: number;
@@ -17,7 +31,18 @@ export type MonthlyPartnerRevenue = {
   isActive: boolean;
   partnerType: PartnerType;
   partnerTypeLabel: string;
+  /** Toàn bộ doanh số qua link trong tháng (mọi loại đơn). */
   revenue: number;
+  /** Doanh số khách mua gói hội viên lần đầu — căn cứ tính thù lao theo phụ lục. */
+  newCustomerRevenue: number;
+  /** Doanh số qua link của chính đối tác / của nhân viên trong thời gian được ghi nhận. */
+  directRevenue: number;
+  staffRevenue: number;
+  /** Phụ lục áp dụng cho tháng. */
+  tier: ContractTier;
+  /** Gia hạn + nâng cấp + khóa học + khác — chưa tính thù lao theo hạng. */
+  otherRevenue: number;
+  breakdown: RevenueBreakdown;
   orderCount: number;
   customerCount: number;
   lastOrderAt: Date | null;
@@ -27,6 +52,8 @@ export type MonthlyPartnerRevenue = {
 export type MonthlyRevenueTotals = {
   partnerCount: number;
   revenue: number;
+  newCustomerRevenue: number;
+  otherRevenue: number;
   baseSalary: number;
   commission: number;
   performanceBonus: number;
@@ -43,7 +70,7 @@ export type MonthlyRevenueReport = {
   totals: MonthlyRevenueTotals;
 };
 
-type MonthlyRevenueRow = {
+type ProfileRow = {
   PartnerId: number;
   UserName: string;
   Email: string;
@@ -51,98 +78,87 @@ type MonthlyRevenueRow = {
   PhoneNumber: string | null;
   IsActive: boolean | number | null;
   PartnerType: string | null;
-  CreatedDate: Date | null;
-  Revenue: number | null;
-  OrderCount: number | null;
-  CustomerCount: number | null;
-  LastOrderDate: Date | null;
+};
+
+export type PartnerProfile = {
+  partnerId: number;
+  username: string;
+  email: string;
+  name: string | null;
+  phone: string | null;
+  isActive: boolean;
+  partnerType: PartnerType;
 };
 
 /**
- * Bản sao inline của usp_GetPartnerMonthlyRevenue (kèm vw_PaidOrders), dùng khi
- * DB chưa chạy db/all-stored-procedures.sql cho phiên bản này.
+ * Thông tin cơ bản của người được FireAnt chi trả: đối tác (CTV) và NVKD, kèm email/tên/SĐT
+ * trên tài khoản FireAnt. Nhân viên của đối tác không có dòng riêng.
  */
-const FALLBACK_QUERY = `
-  WITH PaidOrders AS (
-    -- Inline của db/views/vw_PaidOrders.sql: đơn IsPaid = 1,
-    -- Amount = doanh thu thực thu (đơn nâng cấp chỉ tính phần chênh lệch đã trả,
-    -- đơn thường trừ khoản giảm của mã khuyến mại).
-    SELECT
-      o.OrderID, o.OrderDate, o.UserName, o.CouponCode,
-      CASE
-        WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
-          THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-        ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
-      END AS Amount
-    FROM [EStocks_Data].[dbo].[service_Orders] o
-    LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
-    LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
-    OUTER APPLY (
-      SELECT SUM(up.Amount) AS Amount
-      FROM [EStocks_Data].[dbo].[service_Upgrades] up
-      WHERE up.OrderID = o.OrderID
-    ) upg
-    WHERE o.IsPaid = 1
-  ),
-  PaidOrderIds AS (
-    SELECT cp.CouponID, MAX(so.OrderID) AS OrderID
-    FROM Coupons cp
-    INNER JOIN PaidOrders so ON so.CouponCode = cp.CouponCode
-    WHERE cp.IsUsed = 1
-      AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
-    GROUP BY cp.CouponID
-  ),
-  MonthlyByPartner AS (
-    SELECT
-      cp.PartnerId,
-      ISNULL(SUM(o.Amount), 0)   AS Revenue,
-      COUNT(o.OrderID)           AS OrderCount,
-      COUNT(DISTINCT o.UserName) AS CustomerCount,
-      MAX(o.OrderDate)           AS LastOrderDate
-    FROM Coupons cp
-    INNER JOIN PaidOrderIds poi ON poi.CouponID = cp.CouponID
-    INNER JOIN PaidOrders o     ON o.OrderID    = poi.OrderID
-    WHERE cp.IsUsed = 1
-      AND o.OrderDate >= @MonthStart
-      AND o.OrderDate <  @MonthEnd
-    GROUP BY cp.PartnerId
-  )
-  SELECT
-    p.PartnerId,
-    i.UserName, i.Email, i.Name, i.PhoneNumber,
-    p.IsActive,
-    p.PartnerType,
-    p.CreatedDate,
-    ISNULL(m.Revenue, 0)       AS Revenue,
-    ISNULL(m.OrderCount, 0)    AS OrderCount,
-    ISNULL(m.CustomerCount, 0) AS CustomerCount,
-    m.LastOrderDate
-  FROM Partners p
-  INNER JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers i ON p.UserName = i.UserName
-  LEFT  JOIN MonthlyByPartner m                       ON m.PartnerId = p.PartnerId
-  WHERE (@PartnerId IS NULL OR p.PartnerId = @PartnerId)
-  ORDER BY ISNULL(m.Revenue, 0) DESC, p.PartnerId;
-`;
-
-function mapRow(r: MonthlyRevenueRow): MonthlyPartnerRevenue {
-  const partnerType = normalizePartnerType(r.PartnerType);
-  const revenue = r.Revenue ?? 0;
-
-  return {
+export async function listPartnerProfiles(partnerId: number | null = null): Promise<PartnerProfile[]> {
+  const pool = await getPool();
+  const res = await pool
+    .request()
+    .input("PartnerId", sql.Int, partnerId)
+    .input("StaffType", sql.NVarChar(32), PARTNER_STAFF_TYPE)
+    .query<ProfileRow>(`
+      SELECT p.PartnerId, i.UserName, i.Email, i.Name, i.PhoneNumber, p.IsActive, p.PartnerType
+      FROM Partners p
+      INNER JOIN NEWFA.FireAnt_Identity.dbo.AspNetUsers i ON p.UserName = i.UserName
+      WHERE (@PartnerId IS NULL OR p.PartnerId = @PartnerId)
+        AND ISNULL(p.PartnerType, N'') <> @StaffType;
+    `);
+  return res.recordset.map((r) => ({
     partnerId: r.PartnerId,
     username: r.UserName,
     email: r.Email,
     name: r.Name ?? null,
     phone: r.PhoneNumber ?? null,
     isActive: r.IsActive === true || r.IsActive === 1,
-    partnerType,
-    partnerTypeLabel: PARTNER_TYPE_LABELS[partnerType],
-    revenue,
-    orderCount: r.OrderCount ?? 0,
-    customerCount: r.CustomerCount ?? 0,
-    lastOrderAt: r.LastOrderDate ?? null,
-    remuneration: calcMonthlyRemuneration(revenue, partnerType),
+    partnerType: normalizePartnerType(r.PartnerType),
+  }));
+}
+
+export type SplitBreakdown = { direct: RevenueBreakdown; staff: RevenueBreakdown };
+
+export function buildMonthlyRow(
+  profile: PartnerProfile,
+  split: SplitBreakdown,
+  tier: ContractTier,
+): MonthlyPartnerRevenue {
+  const breakdown = mergeBreakdowns(split.direct, split.staff);
+  return {
+    ...profile,
+    partnerTypeLabel: PARTNER_TYPE_LABELS[profile.partnerType],
+    revenue: breakdown.total.revenue,
+    newCustomerRevenue: breakdown.new.revenue,
+    otherRevenue: otherRevenue(breakdown),
+    directRevenue: split.direct.total.revenue,
+    staffRevenue: split.staff.total.revenue,
+    tier,
+    breakdown,
+    orderCount: breakdown.total.orders,
+    customerCount: breakdown.total.customers,
+    lastOrderAt: breakdown.lastOrderAt,
+    remuneration: calcPartnerRemuneration(profile.partnerType, tier, remunerationBase(breakdown)),
   };
+}
+
+/** Gom kết quả theo người bán thành (trực tiếp, từ nhân viên) cho từng đối tác của một tháng. */
+export async function getSplitBreakdowns(
+  month: MonthKey,
+  partnerId: number | null = null,
+): Promise<Map<number, SplitBreakdown>> {
+  const { start, end } = monthRange(month);
+  const rows = await getSellerBreakdowns({ start, end, partnerId });
+  const result = new Map<number, SplitBreakdown>();
+  for (const row of rows) {
+    if (row.month !== month) continue;
+    const split = result.get(row.partnerId) ?? { direct: emptyBreakdown(), staff: emptyBreakdown() };
+    if (row.sellerId === row.partnerId) split.direct = mergeBreakdowns(split.direct, row.breakdown);
+    else split.staff = mergeBreakdowns(split.staff, row.breakdown);
+    result.set(row.partnerId, split);
+  }
+  return result;
 }
 
 /** Cộng dồn một tập dòng bất kỳ — dùng lại được sau khi lọc ở phía trang. */
@@ -151,6 +167,8 @@ export function sumMonthlyTotals(rows: MonthlyPartnerRevenue[]): MonthlyRevenueT
     (acc, row) => ({
       partnerCount: acc.partnerCount + 1,
       revenue: acc.revenue + row.revenue,
+      newCustomerRevenue: acc.newCustomerRevenue + row.newCustomerRevenue,
+      otherRevenue: acc.otherRevenue + row.otherRevenue,
       baseSalary: acc.baseSalary + row.remuneration.baseSalary,
       commission: acc.commission + row.remuneration.commission,
       performanceBonus: acc.performanceBonus + row.remuneration.performanceBonus,
@@ -161,6 +179,8 @@ export function sumMonthlyTotals(rows: MonthlyPartnerRevenue[]): MonthlyRevenueT
     {
       partnerCount: 0,
       revenue: 0,
+      newCustomerRevenue: 0,
+      otherRevenue: 0,
       baseSalary: 0,
       commission: 0,
       performanceBonus: 0,
@@ -173,6 +193,8 @@ export function sumMonthlyTotals(rows: MonthlyPartnerRevenue[]): MonthlyRevenueT
 
 export type MonthlyPaidOrder = {
   partnerId: number;
+  /** Người bán: chính đối tác hoặc nhân viên của đối tác. */
+  sellerId: number;
   orderId: number;
   orderDate: Date;
   couponCode: string | null;
@@ -181,107 +203,43 @@ export type MonthlyPaidOrder = {
   /** Giá niêm yết của gói — để đối chiếu với doanh thu thực thu của đơn nâng cấp. */
   listAmount: number;
   amount: number;
+  kind: OrderKind;
 };
-
-type MonthlyPaidOrderRow = {
-  PartnerId: number;
-  OrderID: number;
-  OrderDate: Date;
-  CouponCode: string | null;
-  CustomerUserName: string | null;
-  PackageName: string | null;
-  ListAmount: number | null;
-  Amount: number | null;
-};
-
-/** Bản inline của usp_ListPartnerMonthlyOrders — dùng khi DB chưa có SP này. */
-const FALLBACK_ORDERS_QUERY = `
-  WITH PaidOrders AS (
-    SELECT
-      o.OrderID, o.OrderDate, o.UserName, o.CouponCode,
-      pkg.PackageName,
-      pkg.Amount AS ListAmount,
-      CASE
-        WHEN o.UpgradeAmount IS NOT NULL OR upg.Amount IS NOT NULL
-          THEN ROUND(ISNULL(o.UpgradeAmount, 0) + ISNULL(upg.Amount, 0), 0)
-        ELSE ISNULL(pkg.Amount, 0) - ISNULL(vu.DiscountAmount, 0)
-      END AS Amount
-    FROM [EStocks_Data].[dbo].[service_Orders] o
-    LEFT JOIN [EStocks_Data].[dbo].[service_Packages] pkg ON pkg.PackageID = o.PackageID
-    LEFT JOIN [EStocks_Data].[dbo].[service_DiscountVoucherUsages] vu ON vu.OrderID = o.OrderID
-    OUTER APPLY (
-      SELECT SUM(up.Amount) AS Amount
-      FROM [EStocks_Data].[dbo].[service_Upgrades] up
-      WHERE up.OrderID = o.OrderID
-    ) upg
-    WHERE o.IsPaid = 1
-  ),
-  PaidOrderIds AS (
-    SELECT cp.CouponID, cp.PartnerId, MAX(so.OrderID) AS OrderID
-    FROM Coupons cp
-    INNER JOIN PaidOrders so ON so.CouponCode = cp.CouponCode
-    WHERE cp.IsUsed = 1
-    GROUP BY cp.CouponID, cp.PartnerId
-  )
-  SELECT
-    poi.PartnerId, o.OrderID, o.OrderDate, o.CouponCode,
-    o.UserName AS CustomerUserName, o.PackageName, o.ListAmount, o.Amount
-  FROM PaidOrderIds poi
-  INNER JOIN PaidOrders o ON o.OrderID = poi.OrderID
-  WHERE o.OrderDate >= @MonthStart
-    AND o.OrderDate <  @MonthEnd
-  ORDER BY poi.PartnerId, o.OrderDate, o.OrderID;
-`;
 
 /**
- * Từng đơn đã thanh toán của mọi CTV trong tháng — cùng cách chọn đơn với
- * getMonthlyRevenueReport nên tổng theo CTV khớp cột Doanh số của bảng kê.
+ * Từng đơn đã thanh toán của mọi CTV trong tháng (đã phân loại) — cùng cách chọn đơn
+ * với getMonthlyRevenueReport nên tổng theo CTV khớp cột Doanh số của bảng kê.
  * Dùng cho sheet "Bảng kê đơn hàng" của giấy đề nghị thanh toán.
  */
 export async function listMonthlyPaidOrders(month: MonthKey): Promise<MonthlyPaidOrder[]> {
   const { start, end } = monthRange(normalizeMonthKey(month));
-  try {
-    const pool = await getPool();
-    const buildRequest = () =>
-      pool
-        .request()
-        .input("MonthStart", sql.DateTime, start)
-        .input("MonthEnd", sql.DateTime, end);
-
-    let recordset: MonthlyPaidOrderRow[];
-    try {
-      const res = await buildRequest().execute<MonthlyPaidOrderRow>("usp_ListPartnerMonthlyOrders");
-      recordset = res.recordset;
-    } catch (err) {
-      console.warn(
-        "[listMonthlyPaidOrders] usp_ListPartnerMonthlyOrders không khả dụng, dùng query inline",
-        err,
-      );
-      const res = await buildRequest().query<MonthlyPaidOrderRow>(FALLBACK_ORDERS_QUERY);
-      recordset = res.recordset;
-    }
-
-    return recordset.map((r) => ({
-      partnerId: r.PartnerId,
-      orderId: r.OrderID,
-      orderDate: r.OrderDate,
-      couponCode: r.CouponCode ?? null,
-      customerUserName: r.CustomerUserName ?? null,
-      packageName: r.PackageName ?? null,
-      listAmount: r.ListAmount ?? 0,
-      amount: r.Amount ?? 0,
-    }));
-  } catch (err) {
-    console.error("[listMonthlyPaidOrders]", err);
-    return [];
-  }
+  const orders = await listClassifiedOrders({ start, end });
+  return orders
+    .map((o) => ({
+      partnerId: o.partnerId,
+      sellerId: o.sellerId,
+      orderId: o.orderId,
+      orderDate: o.orderDate,
+      couponCode: o.couponCode,
+      customerUserName: o.customerUserName,
+      packageName: o.packageName,
+      listAmount: o.listAmount,
+      amount: o.amount,
+      kind: o.kind,
+    }))
+    .sort(
+      (a, b) =>
+        a.partnerId - b.partnerId ||
+        a.orderDate.getTime() - b.orderDate.getTime() ||
+        a.orderId - b.orderId,
+    );
 }
 
 /**
- * Doanh thu + hoa hồng của cộng tác viên trong 1 tháng dương lịch.
+ * Doanh số, phụ lục và thù lao của từng người được FireAnt chi trả trong 1 tháng.
  *
- * Doanh thu quy về tháng theo OrderDate của đơn đã thanh toán — cùng mốc với
- * dashboard, nên số liệu hai nơi khớp nhau.
+ * Doanh số quy về tháng theo OrderDate của đơn đã thanh toán, gồm doanh số của nhân viên
+ * trong thời gian được ghi nhận. Thù lao theo phụ lục áp dụng cho tháng đó.
  */
 export async function getMonthlyRevenueReport({
   month,
@@ -292,40 +250,77 @@ export async function getMonthlyRevenueReport({
 }): Promise<MonthlyRevenueReport> {
   const normalizedMonth = normalizeMonthKey(month);
   const { start, end } = monthRange(normalizedMonth);
-  const empty: MonthlyRevenueReport = {
-    month: normalizedMonth,
-    start,
-    end,
-    rows: [],
-    totals: sumMonthlyTotals([]),
-  };
 
   try {
-    const pool = await getPool();
-    const buildRequest = () =>
-      pool
-        .request()
-        .input("MonthStart", sql.DateTime, start)
-        .input("MonthEnd", sql.DateTime, end)
-        .input("PartnerId", sql.Int, partnerId);
-
-    let recordset: MonthlyRevenueRow[];
-    try {
-      const res = await buildRequest().execute<MonthlyRevenueRow>("usp_GetPartnerMonthlyRevenue");
-      recordset = res.recordset;
-    } catch (err) {
-      console.warn(
-        "[getMonthlyRevenueReport] usp_GetPartnerMonthlyRevenue không khả dụng, dùng query inline",
-        err,
-      );
-      const res = await buildRequest().query<MonthlyRevenueRow>(FALLBACK_QUERY);
-      recordset = res.recordset;
-    }
-
-    const rows = recordset.map(mapRow);
+    const [profiles, splits, contracts] = await Promise.all([
+      listPartnerProfiles(partnerId),
+      getSplitBreakdowns(normalizedMonth, partnerId),
+      getContractsForMonth(normalizedMonth, partnerId),
+    ]);
+    const empty: SplitBreakdown = { direct: emptyBreakdown(), staff: emptyBreakdown() };
+    const rows = profiles
+      .map((profile) =>
+        buildMonthlyRow(
+          profile,
+          splits.get(profile.partnerId) ?? empty,
+          contracts.get(profile.partnerId)?.tier ?? "normal",
+        ),
+      )
+      .sort((a, b) => b.revenue - a.revenue || a.partnerId - b.partnerId);
     return { month: normalizedMonth, start, end, rows, totals: sumMonthlyTotals(rows) };
   } catch (err) {
     console.error("[getMonthlyRevenueReport]", err);
-    return empty;
+    return { month: normalizedMonth, start, end, rows: [], totals: sumMonthlyTotals([]) };
   }
+}
+
+export type PartnerMonthHistory = {
+  month: MonthKey;
+  breakdown: RevenueBreakdown;
+  tier: ContractTier;
+  remuneration: RemunerationBreakdown;
+};
+
+/** `count` tháng gần nhất tính tới `lastMonth` (cũ → mới), kể cả tháng không có đơn. */
+export function recentMonths(lastMonth: MonthKey, count: number): MonthKey[] {
+  return Array.from({ length: count }, (_, i) => shiftMonth(lastMonth, i - count + 1));
+}
+
+/**
+ * Lịch sử doanh số/phụ lục/thù lao từng tháng. partnerId null → mọi đối tác
+ * (Map theo partnerId), dùng một truy vấn cho cả khoảng thời gian.
+ */
+export async function getMonthlyHistory(params: {
+  months: MonthKey[];
+  partnerId?: number | null;
+  partnerTypes: Map<number, PartnerType>;
+  tiers: Map<number, Map<MonthKey, ContractTier>>;
+}): Promise<Map<number, PartnerMonthHistory[]>> {
+  const { months, partnerId = null, partnerTypes, tiers } = params;
+  const result = new Map<number, PartnerMonthHistory[]>();
+  if (months.length === 0) return result;
+
+  const start = monthRange(months[0]).start;
+  const end = monthRange(months[months.length - 1]).end;
+  const rows = await getRevenueBreakdowns({ start, end, partnerId });
+
+  const byKey = new Map(rows.map((r) => [`${r.partnerId}|${r.month}`, r.breakdown]));
+  const partnerIds = partnerId !== null ? [partnerId] : Array.from(partnerTypes.keys());
+  for (const id of partnerIds) {
+    const type = partnerTypes.get(id) ?? "collaborator";
+    result.set(
+      id,
+      months.map((month) => {
+        const breakdown = byKey.get(`${id}|${month}`) ?? emptyBreakdown();
+        const tier = tierInMonth(tiers, id, month);
+        return {
+          month,
+          breakdown,
+          tier,
+          remuneration: calcPartnerRemuneration(type, tier, remunerationBase(breakdown)),
+        };
+      }),
+    );
+  }
+  return result;
 }

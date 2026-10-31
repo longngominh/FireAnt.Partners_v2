@@ -1,7 +1,11 @@
 /**
- * Commission/remuneration engine — bậc theo file Excel lương NVKD và hoa hồng đại lý.
+ * Commission/remuneration engine.
  *
- * Rules:
+ * Hai chế độ:
+ *   1. Phụ lục hợp đồng (chỉ collaborator đã ký phụ lục) — xem phần "Phụ lục hợp đồng"
+ *      cuối file: biểu Bạc/Vàng/Kim cương trên doanh số KHÁCH MUA GÓI HỘI VIÊN LẦN ĐẦU.
+ *   2. Bậc lũy tiến (NVKD luôn dùng; CTV chưa ký phụ lục = chính sách Thường)
+ *      theo file Excel lương NVKD và hoa hồng đại lý:
  *   - Incremental: từng phần doanh số tính theo band tương ứng.
  *   - Monthly reset: tích lũy reset về 0 đầu mỗi tháng.
  *   - Từ 09/2026 KHÔNG còn thưởng bán tốt riêng cho cả hai loại — mức thưởng cũ
@@ -17,8 +21,19 @@ export type PartnerType = (typeof PARTNER_TYPES)[number];
 
 export const PARTNER_TYPE_LABELS: Record<PartnerType, string> = {
   sales_employee: "Nhân viên kinh doanh",
-  collaborator: "Cộng tác viên",
+  collaborator: "Đối tác",
 };
+
+/**
+ * Partners.PartnerType của nhân viên bán hàng thuộc một đối tác: có tài khoản và link riêng,
+ * doanh số tính cho đối tác trong thời gian được ghi nhận, FireAnt không chi trả cho họ.
+ * Không nằm trong PartnerType (chế độ thù lao) vì nhân viên không có chế độ nào.
+ */
+export const PARTNER_STAFF_TYPE = "partner_staff";
+
+export function isPartnerStaffType(value: unknown): boolean {
+  return value === PARTNER_STAFF_TYPE;
+}
 
 export type CommissionBand = {
   from: number;
@@ -26,14 +41,21 @@ export type CommissionBand = {
   rate: number;
 };
 
+/** "tier": biểu phụ lục trên DS khách mới; "legacy": bậc lũy tiến trên toàn bộ DS. */
+export type RemunerationPolicy = "tier" | "legacy";
+
 export type RemunerationBreakdown = {
   partnerType: PartnerType;
+  /** Doanh số làm căn cứ tính: DS khách mới (policy "tier") hoặc toàn bộ DS ("legacy"). */
   revenue: number;
   baseSalary: number;
   commission: number;
   performanceBonus: number;
   total: number;
   effectiveRate: number;
+  policy: RemunerationPolicy;
+  /** Phụ lục áp dụng trong tháng — chỉ có khi policy = "tier". */
+  tier: PartnerTier | null;
 };
 
 // Bảng NVKD đã gộp thưởng bán tốt vào tỷ lệ: từ bậc 90tr mỗi bậc cộng thêm
@@ -231,6 +253,8 @@ export function calcMonthlyRemuneration(
       performanceBonus: Math.max(0, total - baseSalary - commission),
       total,
       effectiveRate: revenue > 0 ? total / revenue : 0,
+      policy: "legacy",
+      tier: null,
     };
   }
 
@@ -247,6 +271,8 @@ export function calcMonthlyRemuneration(
     performanceBonus,
     total,
     effectiveRate: revenue > 0 ? total / revenue : 0,
+    policy: "legacy",
+    tier: null,
   };
 }
 
@@ -270,4 +296,192 @@ export function currentMonthRange(): { start: Date; end: Date } {
   const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
   return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// Phụ lục hợp đồng — PLHĐ-FA-SILVER / GOLD / DIAMOND
+// ---------------------------------------------------------------------------
+//
+// Hạng là phụ lục đối tác ĐÃ KÝ (FireAnt chọn ở hồ sơ đối tác), không tự lên theo doanh
+// số. Chưa ký phụ lục = chính sách Thường = bậc lũy tiến CTV ở trên (toàn bộ doanh số).
+//
+// Có phụ lục: căn cứ tính là doanh số KHÁCH MUA GÓI HỘI VIÊN LẦN ĐẦU trong tháng (điểm a
+// của phụ lục), gồm cả doanh số của nhân viên trong thời gian được ghi nhận. Gia hạn,
+// nâng cấp, khóa học chưa có biểu (điểm b, c) nên chưa tính thù lao.
+//
+// Mỗi phụ lục có biểu đầy đủ cho mọi mức doanh số, đúng nguyên văn văn bản: Vàng và Kim
+// cương không có "thưởng hạng" dưới mốc của mình, nên ở một số mức doanh số hạng cao trả
+// ít hơn hạng thấp (vd 150tr: Bạc 25,5tr, Vàng 31,5tr, Kim cương 24tr).
+
+export const PARTNER_TIERS = ["silver", "gold", "diamond"] as const;
+export type PartnerTier = (typeof PARTNER_TIERS)[number];
+
+/** Phụ lục áp dụng cho một tháng: "normal" = chưa ký phụ lục (chính sách Thường). */
+export const CONTRACT_TIERS = ["normal", ...PARTNER_TIERS] as const;
+export type ContractTier = (typeof CONTRACT_TIERS)[number];
+
+export const TIER_LABELS: Record<PartnerTier, string> = {
+  silver: "Bạc",
+  gold: "Vàng",
+  diamond: "Kim cương",
+};
+
+export const CONTRACT_TIER_LABELS: Record<ContractTier, string> = {
+  normal: "Thường",
+  ...TIER_LABELS,
+};
+
+export const TIER_APPENDIX: Record<PartnerTier, string> = {
+  silver: "PLHĐ-FA-SILVER",
+  gold: "PLHĐ-FA-GOLD",
+  diamond: "PLHĐ-FA-DIAMOND",
+};
+
+export function isContractTier(value: unknown): value is ContractTier {
+  return CONTRACT_TIERS.includes(value as ContractTier);
+}
+
+export function isPartnerTier(tier: ContractTier | null | undefined): tier is PartnerTier {
+  return tier === "silver" || tier === "gold" || tier === "diamond";
+}
+
+/** "Hạng Vàng" / "Chính sách Thường" — tên dùng trên chip và tiêu đề. */
+export function contractTierTitle(tier: ContractTier): string {
+  return tier === "normal" ? "Chính sách Thường" : `Hạng ${TIER_LABELS[tier]}`;
+}
+
+/** "Phụ lục Vàng" / "Chính sách Thường" — tên dùng cạnh số tiền thù lao. */
+export function contractTierScheme(tier: ContractTier): string {
+  return tier === "normal" ? "Chính sách Thường" : `Phụ lục ${TIER_LABELS[tier]}`;
+}
+
+/**
+ * Một đoạn của biểu: doanh số R (>= from) được tính
+ *   baseAmount × baseRate + (R − from) × excessRate + R × bonusRate.
+ * Đúng nguyên văn bảng "Cách tính thù lao" trong phụ lục.
+ */
+export type TierSegment = {
+  from: number;
+  baseAmount: number;
+  baseRate: number;
+  excessRate: number;
+  bonusRate: number;
+};
+
+const UNDER_50: TierSegment = { from: 0, baseAmount: 0, baseRate: 0, excessRate: 0.12, bonusRate: 0 };
+const FROM_50: TierSegment = { from: 50_000_000, baseAmount: 50_000_000, baseRate: 0.12, excessRate: 0.15, bonusRate: 0 };
+const FROM_100: TierSegment = { from: 100_000_000, baseAmount: 100_000_000, baseRate: 0.15, excessRate: 0.18, bonusRate: 0 };
+
+export const TIER_SCHEDULES: Record<PartnerTier, readonly TierSegment[]> = {
+  // Bạc — dưới 50tr: 12%; từ 50tr: 50tr × 12% + vượt × 15% + 3% tổng (vd 80tr → 12,9tr).
+  silver: [UNDER_50, { ...FROM_50, bonusRate: 0.03 }],
+  // Vàng — từ 100tr: 100tr × 15% + vượt × 18% + 5% tổng (vd 150tr → 31,5tr).
+  gold: [UNDER_50, FROM_50, { ...FROM_100, bonusRate: 0.05 }],
+  // Kim cương — từ 200tr: 200tr × 18% + vượt × 21% + 12% tổng (vd 300tr → 93tr).
+  diamond: [
+    UNDER_50,
+    FROM_50,
+    FROM_100,
+    { from: 200_000_000, baseAmount: 200_000_000, baseRate: 0.18, excessRate: 0.21, bonusRate: 0.12 },
+  ],
+};
+
+function segmentFor(tier: PartnerTier, revenue: number): TierSegment {
+  const schedule = TIER_SCHEDULES[tier];
+  let found = schedule[0];
+  for (const segment of schedule) {
+    if (revenue >= segment.from) found = segment;
+  }
+  return found;
+}
+
+export type TierPayoutLine = {
+  kind: "base" | "excess" | "bonus";
+  /** Doanh số nhân với rate. */
+  base: number;
+  rate: number;
+  amount: number;
+  /** Với "excess": mốc bắt đầu tính phần vượt (0 = toàn bộ doanh số). */
+  from: number;
+};
+
+export type TierPayout = {
+  tier: PartnerTier;
+  revenue: number;
+  lines: TierPayoutLine[];
+  total: number;
+  effectiveRate: number;
+};
+
+/**
+ * Thù lao tháng theo biểu của phụ lục. Các dòng đã làm tròn xuống tới đồng và dòng cuối
+ * nhận phần dư, nên Σ lines.amount = total — giải thích trên giấy đề nghị khớp từng đồng.
+ */
+export function calcTierPayout(tier: PartnerTier, newCustomerRevenue: number): TierPayout {
+  const revenue = Math.max(0, newCustomerRevenue);
+  const segment = segmentFor(tier, revenue);
+  const exact: TierPayoutLine[] = [];
+  if (segment.baseAmount > 0) {
+    exact.push({ kind: "base", base: segment.baseAmount, rate: segment.baseRate, amount: segment.baseAmount * segment.baseRate, from: 0 });
+  }
+  exact.push({
+    kind: "excess",
+    base: revenue - segment.from,
+    rate: segment.excessRate,
+    amount: (revenue - segment.from) * segment.excessRate,
+    from: segment.from,
+  });
+  if (segment.bonusRate > 0) {
+    exact.push({ kind: "bonus", base: revenue, rate: segment.bonusRate, amount: revenue * segment.bonusRate, from: 0 });
+  }
+
+  const total = Math.floor(exact.reduce((sum, line) => sum + line.amount, 0) + 1e-6);
+  let allocated = 0;
+  const lines = exact.map((line, index) => {
+    const amount = index === exact.length - 1 ? total - allocated : Math.floor(line.amount + 1e-6);
+    allocated += amount;
+    return { ...line, amount };
+  });
+
+  return {
+    tier,
+    revenue,
+    lines,
+    total,
+    effectiveRate: revenue > 0 ? total / revenue : 0,
+  };
+}
+
+/** Thù lao tăng thêm cho mỗi đồng doanh số khách mới kế tiếp ở mức doanh số hiện tại. */
+export function marginalTierRate(tier: PartnerTier, newCustomerRevenue: number): number {
+  const segment = segmentFor(tier, Math.max(0, newCustomerRevenue));
+  return segment.excessRate + segment.bonusRate;
+}
+
+/**
+ * Thù lao tháng của một đối tác theo phụ lục áp dụng cho tháng đó.
+ *   - CTV có phụ lục Bạc/Vàng/Kim cương: biểu của phụ lục trên DS khách mới.
+ *   - Còn lại (NVKD, hoặc CTV chính sách Thường): bậc lũy tiến trên toàn bộ DS.
+ */
+export function calcPartnerRemuneration(
+  partnerType: PartnerType,
+  tier: ContractTier,
+  revenue: { total: number; newCustomer: number },
+): RemunerationBreakdown {
+  const normalizedType = normalizePartnerType(partnerType);
+  if (normalizedType === "collaborator" && isPartnerTier(tier)) {
+    const payout = calcTierPayout(tier, revenue.newCustomer);
+    return {
+      partnerType: normalizedType,
+      revenue: payout.revenue,
+      baseSalary: 0,
+      commission: payout.total,
+      performanceBonus: 0,
+      total: payout.total,
+      effectiveRate: payout.effectiveRate,
+      policy: "tier",
+      tier,
+    };
+  }
+  return calcMonthlyRemuneration(revenue.total, normalizedType);
 }

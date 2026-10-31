@@ -1,4 +1,5 @@
 import { getPool, sql } from "@/lib/db/sql";
+import { listScope } from "@/lib/data/scope";
 import { SOURCE_MAX_LENGTH, SOURCE_NONE, normalizeSource } from "@/lib/payment/source";
 
 export type CouponStatus = "PENDING" | "PAID" | "EXPIRED" | "USED";
@@ -32,6 +33,8 @@ export type Coupon = {
 
 export type CouponListFilter = {
   partnerId?: string | number | null;
+  /** Đối tác: gồm cả link nhân viên tạo trong thời gian được ghi nhận. */
+  teamOf?: number | null;
   status?: CouponStatus | "ALL";
   q?: string;
   /** Tên nguồn, hoặc SOURCE_NONE = link chưa gắn nguồn; bỏ trống = mọi nguồn */
@@ -48,6 +51,7 @@ export type CouponListResult = {
 };
 
 type CouponRow = {
+  PartnerId?: number | null;
   CouponID: number;
   CouponCode: string;
   PaymentLink: string | null;
@@ -89,7 +93,7 @@ function mapCoupon(r: CouponRow): Coupon {
   return {
     id: r.CouponID,
     code: r.CouponCode,
-    partnerId: 0,
+    partnerId: r.PartnerId ?? 0,
     paymentLink: r.PaymentLink ?? "",
     isPaid: r.IsPaid,
     isUsed: r.IsUsed,
@@ -111,7 +115,7 @@ function mapCoupon(r: CouponRow): Coupon {
 }
 
 export async function listCoupons(filter: CouponListFilter = {}): Promise<CouponListResult> {
-  const { partnerId = null, status = "ALL", q = "", source = null, page = 1, pageSize = 20 } = filter;
+  const { partnerId = null, teamOf = null, status = "ALL", q = "", source = null, page = 1, pageSize = 20 } = filter;
   try {
     const numPartnerId =
       partnerId !== null && partnerId !== undefined
@@ -120,7 +124,11 @@ export async function listCoupons(filter: CouponListFilter = {}): Promise<Coupon
           : partnerId
         : null;
 
-    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
+    const scope = await listScope(
+      numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null,
+      teamOf,
+    );
+    const validPartnerId = scope.partnerId;
     const offset = (page - 1) * pageSize;
     const qParam = q.trim() ? `%${q.trim()}%` : null;
     const sourceParam = sourceFilterParam(source);
@@ -147,6 +155,10 @@ export async function listCoupons(filter: CouponListFilter = {}): Promise<Coupon
     if (sourceParam !== null) {
       dataReq.input("Source", sql.NVarChar(50), sourceParam);
       countReq.input("Source", sql.NVarChar(50), sourceParam);
+    }
+    if (scope.teamOf !== null) {
+      dataReq.input("TeamOf", sql.Int, scope.teamOf);
+      countReq.input("TeamOf", sql.Int, scope.teamOf);
     }
 
     const dataRes = await dataReq.execute<CouponRow>("usp_ListCoupons");
@@ -243,16 +255,19 @@ export async function createCoupon(input: CreateCouponInput): Promise<{ id: numb
  * Các nguồn khách đối tác đã gắn cho link (mới dùng gần nhất trước) — gợi ý ở trang tạo
  * link và danh sách cho ô lọc. partnerId null = mọi đối tác (admin).
  */
-export async function listCouponSources(partnerId: string | number | null): Promise<string[]> {
+export async function listCouponSources(
+  partnerId: string | number | null,
+  teamOf: number | null = null,
+): Promise<string[]> {
   const numPartnerId =
     partnerId === null ? null : typeof partnerId === "string" ? parseInt(partnerId, 10) : partnerId;
 
   try {
+    const scope = await listScope(numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null, teamOf);
     const pool = await getPool();
-    const res = await pool
-      .request()
-      .input("PartnerId", sql.Int, numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null)
-      .execute<{ Source: string | null }>("usp_ListCouponSources");
+    const req = pool.request().input("PartnerId", sql.Int, scope.partnerId);
+    if (scope.teamOf !== null) req.input("TeamOf", sql.Int, scope.teamOf);
+    const res = await req.execute<{ Source: string | null }>("usp_ListCouponSources");
     return res.recordset.map((r) => r.Source?.trim() ?? "").filter(Boolean);
   } catch (err) {
     console.error("[listCouponSources]", err);

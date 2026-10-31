@@ -1,4 +1,5 @@
 import { getPool, sql } from "@/lib/db/sql";
+import { listScope } from "@/lib/data/scope";
 
 /**
  * Đơn CTV bán ĐÃ THU TIỀN nhưng email khách CHƯA CÓ tài khoản FireAnt.
@@ -29,6 +30,8 @@ export type PendingAccountOrder = {
 
 export type PendingAccountFilter = {
   partnerId?: string | number | null;
+  /** Đối tác: gồm cả đơn qua link của nhân viên trong thời gian được ghi nhận. */
+  teamOf?: number | null;
   q?: string;
   page?: number;
   pageSize?: number;
@@ -80,7 +83,7 @@ function mapRow(r: PendingRow): PendingAccountOrder {
 export async function listPaidOrdersWithoutAccount(
   filter: PendingAccountFilter = {},
 ): Promise<PendingAccountResult> {
-  const { partnerId = null, q = "", page = 1, pageSize = 20 } = filter;
+  const { partnerId = null, teamOf = null, q = "", page = 1, pageSize = 20 } = filter;
 
   try {
     const numPartnerId =
@@ -90,7 +93,10 @@ export async function listPaidOrdersWithoutAccount(
           : partnerId
         : null;
 
-    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
+    const scope = await listScope(
+      numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null,
+      teamOf,
+    );
     const offset = (page - 1) * pageSize;
     const qParam = q.trim() ? `%${q.trim()}%` : null;
 
@@ -99,14 +105,15 @@ export async function listPaidOrdersWithoutAccount(
     // Một lần gọi cho cả trang lẫn tổng số: tập ứng viên (và lượt join sang linked server
     // NEWFA) chỉ dựng một lần thay vì hai. Xem chú thích hiệu năng trong
     // db/stored-procedures/usp_ListPaidOrdersWithoutAccount.sql.
-    const dataRes = await pool
+    const req = pool
       .request()
-      .input("PartnerId", sql.Int, validPartnerId)
+      .input("PartnerId", sql.Int, scope.partnerId)
       .input("Q", sql.NVarChar(200), qParam)
       .input("Offset", sql.Int, offset)
       .input("PageSize", sql.Int, pageSize)
-      .output("Total", sql.Int)
-      .execute<PendingRow>("usp_ListPaidOrdersWithoutAccount");
+      .output("Total", sql.Int);
+    if (scope.teamOf !== null) req.input("TeamOf", sql.Int, scope.teamOf);
+    const dataRes = await req.execute<PendingRow>("usp_ListPaidOrdersWithoutAccount");
 
     return {
       rows: dataRes.recordset.map(mapRow),
@@ -126,6 +133,7 @@ export async function listPaidOrdersWithoutAccount(
  */
 export async function countPaidOrdersWithoutAccount(
   partnerId?: string | number | null,
+  teamOf: number | null = null,
 ): Promise<number> {
   try {
     const numPartnerId =
@@ -135,14 +143,18 @@ export async function countPaidOrdersWithoutAccount(
           : partnerId
         : null;
 
-    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
+    const scope = await listScope(
+      numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null,
+      teamOf,
+    );
 
     const pool = await getPool();
-    const res = await pool
+    const req = pool
       .request()
-      .input("PartnerId", sql.Int, validPartnerId)
-      .input("Q", sql.NVarChar(200), null)
-      .execute<{ Total: number }>("usp_CountPaidOrdersWithoutAccount");
+      .input("PartnerId", sql.Int, scope.partnerId)
+      .input("Q", sql.NVarChar(200), null);
+    if (scope.teamOf !== null) req.input("TeamOf", sql.Int, scope.teamOf);
+    const res = await req.execute<{ Total: number }>("usp_CountPaidOrdersWithoutAccount");
 
     return res.recordset[0]?.Total ?? 0;
   } catch (err) {

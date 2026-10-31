@@ -24,7 +24,7 @@ export function DeletePartnerButton({ partnerId }: DeletePartnerButtonProps) {
         disabled={isPending}
         onClick={() => {
           const confirmed = window.confirm(
-            "Xóa cộng tác viên này khỏi danh sách quản lý? Dữ liệu lịch sử vẫn được giữ lại.",
+            "Ngừng quản lý đối tác này (chuyển sang tạm dừng)? Dữ liệu lịch sử vẫn được giữ lại.",
           );
           if (!confirmed) return;
 
@@ -32,7 +32,7 @@ export function DeletePartnerButton({ partnerId }: DeletePartnerButtonProps) {
             setError(null);
             const result = await deletePartnerAction(partnerId);
             if (!result.ok) {
-              setError(result.error ?? "Không thể xóa cộng tác viên.");
+              setError(result.error ?? "Không thể xóa đối tác.");
               return;
             }
 

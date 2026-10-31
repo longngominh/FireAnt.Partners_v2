@@ -25,6 +25,8 @@ type Props = {
   defaultRequesterName: string;
   payableCount: number;
   payableAmount: number;
+  /** Số người trong giấy đề nghị thiếu số tài khoản hoặc mã số thuế — nhắc bổ sung trước khi gửi kế toán. */
+  missingInfoCount?: number;
 };
 
 function todayInputValue(): string {
@@ -40,6 +42,7 @@ export function PaymentRequestDialog({
   defaultRequesterName,
   payableCount,
   payableAmount,
+  missingInfoCount = 0,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -73,7 +76,7 @@ export function PaymentRequestDialog({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = match?.[1] ?? `De nghi TT CTV ${month}.xlsx`;
+      link.download = match?.[1] ?? `De nghi TT doi tac ${month}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
 
@@ -98,8 +101,11 @@ export function PaymentRequestDialog({
           <DialogTitle>Giấy đề nghị thanh toán</DialogTitle>
           <DialogDescription>
             {payableCount > 0
-              ? `${payableCount} cộng tác viên, tổng đề nghị thanh toán ${formatVND(payableAmount)} cho kỳ ${formatMonthRangeLabel(month)}.`
-              : "Danh sách đang lọc không có cộng tác viên nào phát sinh hoa hồng."}
+              ? `${payableCount} người, tổng đề nghị thanh toán ${formatVND(payableAmount)} cho kỳ ${formatMonthRangeLabel(month)}. Gồm bảng đề nghị, giải thích cách tính và bảng kê đơn.`
+              : "Không có ai phát sinh hoa hồng trong kỳ này."}
+            {missingInfoCount > 0
+              ? ` ${missingInfoCount} người thiếu số tài khoản hoặc mã số thuế — bổ sung trước khi gửi kế toán.`
+              : null}
           </DialogDescription>
         </DialogHeader>
 

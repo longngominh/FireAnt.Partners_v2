@@ -1,64 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import { usePathname } from "next/navigation";
-import {
-  MenuIcon,
-  LayoutDashboardIcon,
-  LinkIcon,
-  TicketIcon,
-  UsersIcon,
-  UserRoundXIcon,
-  ShieldIcon,
-  WalletIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { MenuIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetClose,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { SidebarContent, type SidebarProps } from "./sidebar";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  exact?: boolean;
-};
-
-const partnerNav: NavItem[] = [
-  { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboardIcon, exact: true },
-  { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
-  { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
-  { href: "/payment/pending-account", label: "Đơn chờ tài khoản", icon: UserRoundXIcon },
-  { href: "/customers", label: "Khách hàng", icon: UsersIcon },
-];
-
-const adminNav: NavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
-  { href: "/admin/partners", label: "Quản lý CTV", icon: ShieldIcon },
-  { href: "/admin/revenue", label: "Doanh thu & hoa hồng", icon: WalletIcon },
-];
-
-function isActive(pathname: string, href: string, exact?: boolean): boolean {
-  const cleanHref = href.split("?")[0];
-  if (exact) return pathname === cleanHref;
-  return pathname === cleanHref || pathname.startsWith(`${cleanHref}/`);
-}
-
-export function MobileNav({ role }: { role: string }) {
+/** Menu trượt trên điện thoại — cùng nội dung với thanh bên của từng không gian. */
+export function MobileNav(props: Omit<SidebarProps, "footer">) {
   const [open, setOpen] = useState(false);
-  const pathname = usePathname();
-  const isAdmin = role === "admin";
-  const sections = [
-    ...(isAdmin ? [{ label: "Quản trị", items: adminNav }] : []),
-    { label: "Đối tác", items: partnerNav },
-  ];
 
   return (
     <div className="md:hidden">
@@ -66,54 +16,21 @@ export function MobileNav({ role }: { role: string }) {
         variant="ghost"
         size="icon"
         onClick={() => setOpen(true)}
-        className="h-9 w-9"
+        className="size-10"
         aria-label="Mở menu"
       >
         <MenuIcon className="size-5" />
       </Button>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-72 p-0" showCloseButton={false}>
-          <SheetHeader className="flex h-14 flex-row items-center gap-2 border-b px-4 py-0">
-            <Image src="/logo.png" alt="FireAnt" width={28} height={28} className="rounded-md" />
-            <SheetTitle className="flex flex-col leading-none">
-              <span className="text-sm font-semibold">FireAnt</span>
-              <span className="text-xs text-muted-foreground font-normal">Partners</span>
-            </SheetTitle>
-          </SheetHeader>
-
-          <nav className="flex-1 overflow-y-auto px-3 py-5">
-            {sections.map((section, index) => (
-              <div key={section.label} className={index > 0 ? "mt-5" : ""}>
-                <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-                  {section.label}
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  {section.items.map((item) => {
-                    const Icon = item.icon;
-                    const active = isActive(pathname, item.href, item.exact);
-                    return (
-                      <SheetClose asChild key={item.href}>
-                        <Link
-                          href={item.href}
-                          className={cn(
-                            "flex items-center gap-3 rounded-md py-2.5 pr-3 pl-3 text-sm transition-all duration-150",
-                            "hover:bg-accent hover:text-accent-foreground",
-                            active
-                              ? "border-l-2 border-primary bg-accent pl-[10px] font-semibold text-accent-foreground"
-                              : "font-medium text-foreground/70",
-                          )}
-                        >
-                          <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-foreground/50")} />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SheetClose>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </nav>
+        <SheetContent
+          side="left"
+          data-workspace={props.workspace}
+          className="w-72 overflow-y-auto bg-sidebar p-0 text-sidebar-foreground"
+          showCloseButton={false}
+        >
+          <SheetTitle className="sr-only">Menu điều hướng</SheetTitle>
+          <SidebarContent {...props} onNavigate={() => setOpen(false)} />
         </SheetContent>
       </Sheet>
     </div>

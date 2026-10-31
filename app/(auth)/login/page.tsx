@@ -65,10 +65,13 @@ export default async function LoginPage({
           {error && (
             <div className="mb-5 rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-3 text-sm text-destructive">
               {error === "AccessDenied" ? (
-                <p className="leading-relaxed">
-                  Tài khoản của bạn chưa được cấp quyền truy cập hệ thống đối tác.
-                  Vui lòng liên hệ quản trị viên.
-                </p>
+                <span className="flex flex-col gap-1.5 leading-relaxed">
+                  <span className="font-semibold">Tài khoản này chưa dùng được FireAnt Partners.</span>
+                  <span>
+                    Bán hàng cho một đối tác của FireAnt? Gửi email tài khoản FireAnt cho đối tác để họ đề xuất bạn — bạn vào được
+                    sau khi FireAnt duyệt. Muốn trở thành đối tác, liên hệ FireAnt để ký hợp đồng.
+                  </span>
+                </span>
               ) : (
                 <p>Đăng nhập thất bại. Vui lòng thử lại.</p>
               )}

@@ -1,6 +1,8 @@
 import NextAuth from "next-auth";
 import type { OIDCConfig } from "next-auth/providers";
 import { getPool, sql } from "@/lib/db/sql";
+import { isPartnerStaffType } from "@/lib/commission";
+import { getLatestApplicationForUser } from "@/lib/data/staff";
 import { authConfig } from "./auth.config";
 
 type IS4Profile = {
@@ -15,7 +17,18 @@ type PartnerRow = {
   PartnerId: number;
   IsActive: boolean | null;
   UserName: string;
+  PartnerType: string | null;
 };
+
+/**
+ * Vai trò trong JWT:
+ *   admin     — quản lý FireAnt (role IS4); có thể kiêm đối tác (partnerId).
+ *   partner   — đối tác ký hợp đồng (CTV) hoặc NVKD FireAnt.
+ *   staff     — nhân viên bán hàng của một đối tác (Partners.PartnerType = partner_staff).
+ *   applicant — chưa có quyền bán hàng nhưng có đề xuất đang chờ duyệt / bị từ chối:
+ *               chỉ xem được trang trạng thái.
+ */
+type PortalRole = "partner" | "staff" | "applicant";
 
 const is4BaseUrl = process.env.AUTH_IS4_ISSUER ?? "https://accounts.fireant.vn";
 
@@ -55,7 +68,7 @@ async function lookupPartner(
       .request()
       .input("username", sql.NVarChar(256), username)
       .query<PartnerRow>(
-        "SELECT PartnerId, IsActive, UserName FROM Partners WHERE UserName = @username",
+        "SELECT PartnerId, IsActive, UserName, PartnerType FROM Partners WHERE UserName = @username",
       );
 
     if (r.recordset[0]) {
@@ -68,6 +81,20 @@ async function lookupPartner(
   } catch (err) {
     console.error("[auth] lookupPartner error:", err);
     return null;
+  }
+}
+
+function portalRole(partner: PartnerRow): PortalRole {
+  return isPartnerStaffType(partner.PartnerType) ? "staff" : "partner";
+}
+
+/** Người được đề xuất làm nhân viên nhưng chưa có dòng Partners (chờ duyệt / bị từ chối). */
+async function hasOpenApplication(username: string): Promise<boolean> {
+  try {
+    return (await getLatestApplicationForUser(username)) !== null;
+  } catch (err) {
+    console.error("[auth] hasOpenApplication error:", err);
+    return false;
   }
 }
 
@@ -120,7 +147,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     authorized: authConfig.callbacks!.authorized!,
 
-    // Deny login nếu không phải partner active và không phải admin IS4
+    // Deny login nếu không phải admin IS4, không có dòng Partners đang bật và không có đề xuất
+    // nhân viên nào đang chờ duyệt / bị từ chối.
     async signIn({ user, profile }) {
       const sub = user.id;
       if (!sub) return false;
@@ -137,7 +165,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const partner = await lookupPartner(p?.name ?? "");
       if (partner !== null && partner.IsActive !== false) return true;
 
-      return false;
+      return hasOpenApplication(p?.name ?? "");
     },
 
     async jwt({ token, account, profile }) {
@@ -158,12 +186,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               : null;
           token.userId = partner?.UserName ?? null;
         } else {
-          // Không phải admin → kiểm tra partner trong DB
+          // Không phải admin → đối tác, nhân viên của đối tác, hoặc người đang được đề xuất
           const partner = await lookupPartner(p?.name ?? "");
           if (partner !== null && partner.IsActive !== false) {
-            token.role = "partner";
+            token.role = portalRole(partner);
             token.partnerId = String(partner.PartnerId);
             token.userId = partner.UserName;
+          } else if (await hasOpenApplication(p?.name ?? "")) {
+            token.role = "applicant";
+            token.partnerId = null;
+            token.userId = p?.name ?? null;
           } else {
             token.role = null;
             token.partnerId = null;

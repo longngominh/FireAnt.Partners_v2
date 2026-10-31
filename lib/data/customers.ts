@@ -1,7 +1,10 @@
 import { getPool, sql } from "@/lib/db/sql";
+import { listScope } from "@/lib/data/scope";
 import { sourceFilterParam } from "@/lib/data/payment";
 
 export type Customer = {
+  /** Người bán (chủ link) — đối tác hoặc nhân viên của đối tác. */
+  partnerId: number | null;
   username: string;
   email: string | null;
   phone: string | null;
@@ -19,6 +22,8 @@ export type Customer = {
 
 export type CustomerListFilter = {
   partnerId?: string | number | null;
+  /** Đối tác: gồm cả khách mua qua link của nhân viên trong thời gian được ghi nhận. */
+  teamOf?: number | null;
   q?: string;
   /** Tên nguồn, hoặc SOURCE_NONE = khách chưa gắn nguồn; bỏ trống = mọi nguồn */
   source?: string | null;
@@ -44,12 +49,13 @@ type CustomerRow = {
   MemberStartDate: Date | null;
   MemberEndDate: Date | null;
   LatestPackage: string | null;
+  PartnerId?: number | null;
   PartnerName: string | null;
   Source: string | null;
 };
 
 export async function listCustomers(filter: CustomerListFilter = {}): Promise<CustomerListResult> {
-  const { partnerId = null, q = "", source = null, page = 1, pageSize = 20 } = filter;
+  const { partnerId = null, teamOf = null, q = "", source = null, page = 1, pageSize = 20 } = filter;
   try {
     const numPartnerId =
       partnerId !== null && partnerId !== undefined
@@ -58,7 +64,11 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
           : partnerId
         : null;
 
-    const validPartnerId = numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null;
+    const scope = await listScope(
+      numPartnerId !== null && !isNaN(numPartnerId) ? numPartnerId : null,
+      teamOf,
+    );
+    const validPartnerId = scope.partnerId;
     const offset = (page - 1) * pageSize;
     const qParam = q.trim() ? `%${q.trim()}%` : null;
 
@@ -78,6 +88,7 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
     // Chỉ gửi @Source khi đang lọc — proc bản trước vẫn chạy được (xem listCoupons).
     const sourceParam = sourceFilterParam(source);
     if (sourceParam !== null) req.input("Source", sql.NVarChar(50), sourceParam);
+    if (scope.teamOf !== null) req.input("TeamOf", sql.Int, scope.teamOf);
 
     const dataRes = await req.execute<CustomerRow>("usp_ListCustomers");
 
@@ -92,6 +103,7 @@ export async function listCustomers(filter: CustomerListFilter = {}): Promise<Cu
       memberStartDate: r.MemberStartDate ?? null,
       memberEndDate: r.MemberEndDate ?? null,
       latestPackage: r.LatestPackage ?? null,
+      partnerId: r.PartnerId ?? null,
       partnerName: r.PartnerName ?? null,
       source: r.Source ?? null,
     }));

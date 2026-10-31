@@ -7,6 +7,15 @@ import { Label } from "@/components/ui/label";
 import { PHONE_INVALID_MESSAGE, normalizeVnPhone } from "@/lib/payment/phone";
 import type { CustomerLookup } from "@/lib/payment/types";
 
+/** Chip báo đơn gói hội viên của khách này là khách mới (tính phí/thù lao theo phụ lục). */
+function NewCustomerChip() {
+  return (
+    <p className="w-fit rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-semibold text-success">
+      Khách mới · mua gói hội viên lần đầu
+    </p>
+  );
+}
+
 /** Dòng trạng thái dưới ô "Tài khoản FireAnt" của form mua gói. */
 export function CustomerLookupStatus({
   lookup,
@@ -33,18 +42,27 @@ export function CustomerLookupStatus({
 
   if (lookup?.status === "account") {
     return (
-      <p className="flex items-center gap-1.5 text-xs text-success">
-        <CircleCheckIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate">
-          Tài khoản FireAnt: <strong className="font-semibold">{lookup.userName}</strong>
-        </span>
-      </p>
+      <div className="flex flex-col gap-1.5">
+        <p className="flex items-center gap-1.5 text-xs text-success">
+          <CircleCheckIcon className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate">
+            Tài khoản FireAnt: <strong className="font-semibold">{lookup.userName}</strong>
+          </span>
+        </p>
+        {lookup.isReturningMember === false ? <NewCustomerChip /> : null}
+        {lookup.isReturningMember ? (
+          <p className="w-fit rounded-full border bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            Khách đã từng mua hội viên · đơn gói hội viên sẽ là gia hạn
+          </p>
+        ) : null}
+      </div>
     );
   }
 
   if (lookup?.status === "new-email") {
     return (
       <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5">
+        <NewCustomerChip />
         <p className="text-xs leading-relaxed">
           <strong className="font-semibold">Email này chưa có tài khoản FireAnt.</strong> Tạo tài khoản hộ khách để
           gói kích hoạt ngay khi nhận tiền và áp được mã khuyến mại.

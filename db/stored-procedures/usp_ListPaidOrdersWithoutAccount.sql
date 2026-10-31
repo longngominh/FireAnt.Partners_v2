@@ -27,7 +27,8 @@ CREATE OR ALTER PROCEDURE usp_ListPaidOrdersWithoutAccount
   @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
   @Offset    INT           = 0,
   @PageSize  INT           = 20,
-  @Total     INT           = NULL OUTPUT   -- tổng số dòng, để trang không phải gọi thêm proc đếm
+  @Total     INT           = NULL OUTPUT,   -- tổng số dòng, để trang không phải gọi thêm proc đếm
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -51,6 +52,13 @@ BEGIN
   INNER JOIN PaidByCoupon p                                   ON p.CouponCode = cp.CouponCode
   INNER JOIN [EStocks_Data].[dbo].[service_Orders] so         ON so.OrderID   = p.OrderID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+      SELECT 1 FROM PartnerStaffMemberships ms
+      WHERE ms.PartnerId = @TeamOf
+        AND ms.StaffPartnerId = cp.PartnerId
+        AND cp.CreatedDate >= ms.StartDate
+        AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+    ))
     AND (@Q IS NULL OR ISNULL(so.UserName, '') LIKE @Q OR cp.CouponCode LIKE @Q);
 
   -- Ứng viên ĐÃ có tài khoản (xem chú thích hiệu năng ở đầu file)
@@ -105,7 +113,8 @@ GO
 -- để chỉ dựng tập ứng viên một lần.
 CREATE OR ALTER PROCEDURE usp_CountPaidOrdersWithoutAccount
   @PartnerId INT           = NULL,
-  @Q         NVARCHAR(200) = NULL
+  @Q         NVARCHAR(200) = NULL,
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -124,6 +133,13 @@ BEGIN
   INNER JOIN PaidByCoupon p                            ON p.CouponCode = cp.CouponCode
   INNER JOIN [EStocks_Data].[dbo].[service_Orders] so  ON so.OrderID   = p.OrderID
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+      SELECT 1 FROM PartnerStaffMemberships ms
+      WHERE ms.PartnerId = @TeamOf
+        AND ms.StaffPartnerId = cp.PartnerId
+        AND cp.CreatedDate >= ms.StartDate
+        AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+    ))
     AND (@Q IS NULL OR ISNULL(so.UserName, '') LIKE @Q OR cp.CouponCode LIKE @Q);
 
   SELECT c.OrderID

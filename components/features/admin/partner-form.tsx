@@ -15,11 +15,13 @@ type PartnerFormProps = {
   action: (prevState: PartnerFormState, formData: FormData) => Promise<PartnerFormState>;
   partner?: Partner;
   paymentInfo?: PartnerPaymentInfo;
+  /** Hiện ô loại đối tác (cá nhân/pháp nhân) và mã số thuế — cần CSDL đã có cột LegalType/TaxCode. */
+  legalFields?: boolean;
 };
 
 const initialState: PartnerFormState = { ok: false };
 
-export function PartnerForm({ action, partner, paymentInfo }: PartnerFormProps) {
+export function PartnerForm({ action, partner, paymentInfo, legalFields = false }: PartnerFormProps) {
   const [state, formAction, isPending] = useActionState(action, initialState);
   const mode = partner ? "edit" : "create";
   const defaultType: PartnerType = partner?.partnerType ?? "collaborator";
@@ -41,15 +43,15 @@ export function PartnerForm({ action, partner, paymentInfo }: PartnerFormProps) 
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="partnerType">Loại cộng tác viên</Label>
+            <Label htmlFor="partnerType">Loại tài khoản</Label>
             <select
               id="partnerType"
               name="partnerType"
               defaultValue={defaultType}
               className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
-              <option value="sales_employee">{PARTNER_TYPE_LABELS.sales_employee}</option>
-              <option value="collaborator">{PARTNER_TYPE_LABELS.collaborator}</option>
+              <option value="collaborator">{PARTNER_TYPE_LABELS.collaborator} (ký hợp đồng dịch vụ)</option>
+              <option value="sales_employee">{PARTNER_TYPE_LABELS.sales_employee} FireAnt</option>
             </select>
           </div>
 
@@ -67,17 +69,46 @@ export function PartnerForm({ action, partner, paymentInfo }: PartnerFormProps) 
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium">Thông tin chi trả</p>
               <p className="text-xs text-muted-foreground">
-                Dùng cho Giấy đề nghị thanh toán hoa hồng hàng tháng.
+                Dùng cho Giấy đề nghị thanh toán hàng tháng. FireAnt chỉ chi cho người đứng tên hợp đồng.
               </p>
             </div>
 
+            {legalFields ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input type="hidden" name="hasLegalFields" value="1" />
+                <div className="grid gap-2">
+                  <Label htmlFor="legalType">Đối tác là</Label>
+                  <select
+                    id="legalType"
+                    name="legalType"
+                    defaultValue={paymentInfo?.legalType ?? "individual"}
+                    className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    <option value="individual">Cá nhân</option>
+                    <option value="company">Pháp nhân (doanh nghiệp)</option>
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="taxCode">Mã số thuế</Label>
+                  <Input
+                    id="taxCode"
+                    name="taxCode"
+                    defaultValue={paymentInfo?.taxCode ?? ""}
+                    placeholder="10 hoặc 13 chữ số"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            ) : null}
+
             <div className="grid gap-2">
-              <Label htmlFor="fullName">Họ tên trên chứng từ</Label>
+              <Label htmlFor="fullName">Tên người đứng tên hợp đồng</Label>
               <Input
                 id="fullName"
                 name="fullName"
                 defaultValue={paymentInfo?.fullName ?? ""}
-                placeholder="Tên đầy đủ trùng với tài khoản ngân hàng"
+                placeholder="Họ tên cá nhân hoặc tên doanh nghiệp, trùng tài khoản ngân hàng"
                 autoComplete="off"
               />
             </div>
@@ -124,7 +155,7 @@ export function PartnerForm({ action, partner, paymentInfo }: PartnerFormProps) 
                 ? "Đang lưu..."
                 : mode === "edit"
                   ? "Lưu thay đổi"
-                  : "Thêm cộng tác viên"}
+                  : "Thêm đối tác"}
             </Button>
             <Button asChild type="button" variant="outline">
               <Link href="/admin/partners">Hủy</Link>

@@ -1,17 +1,25 @@
+import { CONTRACT_TIER_LABELS } from "@/lib/commission";
 import type { MonthlyPartnerRevenue, MonthlyRevenueTotals } from "@/lib/data/revenue";
 import { formatMonthRangeLabel, type MonthKey } from "@/lib/utils/month";
 
 const HEADER = [
-  "Cộng tác viên",
+  "Đối tác",
   "Email",
   "Tài khoản",
   "Loại",
   "Trạng thái",
-  "Doanh số",
+  "Chế độ tính",
+  "Phụ lục",
+  "DS trực tiếp",
+  "DS từ nhân viên",
+  "DS khách mới",
+  "DS gia hạn, nâng cấp, khóa học",
+  "Tổng doanh số",
+  "DS tính thù lao",
   "Lương cứng",
   "Hoa hồng",
   "Thưởng doanh số",
-  "Tổng doanh thu",
+  "Thù lao chi trả",
   "Tỷ lệ hiệu dụng (%)",
   "Số đơn",
   "Số khách",
@@ -41,8 +49,10 @@ export function buildMonthlyRevenueCsv(
   totals: MonthlyRevenueTotals,
   month: MonthKey,
 ): string {
+  const commissionBase = rows.reduce((sum, row) => sum + row.remuneration.revenue, 0);
+  const payable = totals.commission + totals.performanceBonus;
   const lines = [
-    toLine([`Doanh thu & hoa hồng cộng tác viên — ${formatMonthRangeLabel(month)}`]),
+    toLine([`Phí/thù lao đối tác — ${formatMonthRangeLabel(month)}`]),
     "",
     toLine(HEADER),
     ...rows.map((row) =>
@@ -52,11 +62,18 @@ export function buildMonthlyRevenueCsv(
         row.username,
         row.partnerTypeLabel,
         row.isActive ? "Đang hoạt động" : "Tạm dừng",
+        row.remuneration.policy === "tier" ? "Theo phụ lục" : "Bậc lũy tiến",
+        row.partnerType === "collaborator" ? CONTRACT_TIER_LABELS[row.tier] : "",
+        row.directRevenue,
+        row.staffRevenue,
+        row.newCustomerRevenue,
+        row.otherRevenue,
         row.revenue,
+        row.remuneration.revenue,
         row.remuneration.baseSalary,
         row.remuneration.commission,
         row.remuneration.performanceBonus,
-        row.remuneration.total,
+        row.remuneration.commission + row.remuneration.performanceBonus,
         percent(row.remuneration.effectiveRate),
         row.orderCount,
         row.customerCount,
@@ -67,13 +84,20 @@ export function buildMonthlyRevenueCsv(
       "",
       "",
       "",
-      `${totals.partnerCount} CTV`,
+      `${totals.partnerCount} người`,
+      "",
+      "",
+      rows.reduce((sum, row) => sum + row.directRevenue, 0),
+      rows.reduce((sum, row) => sum + row.staffRevenue, 0),
+      totals.newCustomerRevenue,
+      totals.otherRevenue,
       totals.revenue,
+      commissionBase,
       totals.baseSalary,
       totals.commission,
       totals.performanceBonus,
-      totals.remuneration,
-      percent(totals.revenue > 0 ? totals.remuneration / totals.revenue : 0),
+      payable,
+      percent(commissionBase > 0 ? payable / commissionBase : 0),
       totals.orderCount,
       totals.customerCount,
     ]),
@@ -83,5 +107,5 @@ export function buildMonthlyRevenueCsv(
 }
 
 export function monthlyRevenueCsvFilename(month: MonthKey): string {
-  return `doanh-thu-hoa-hong-${month}.csv`;
+  return `thu-lao-doi-tac-${month}.csv`;
 }

@@ -2,7 +2,8 @@ CREATE OR ALTER PROCEDURE usp_CountCoupons
   @PartnerId INT           = NULL,
   @Status    NVARCHAR(20)  = 'ALL',
   @Q         NVARCHAR(200) = NULL,   -- truyền dạng '%keyword%' từ app
-  @Source    NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
+  @Source    NVARCHAR(50)  = NULL,    -- NULL = mọi nguồn; N'' = link chưa gắn nguồn
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -23,6 +24,13 @@ BEGIN
   SELECT COUNT(*) AS Total
   FROM  Coupons cp
   WHERE (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+    AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+      SELECT 1 FROM PartnerStaffMemberships ms
+      WHERE ms.PartnerId = @TeamOf
+        AND ms.StaffPartnerId = cp.PartnerId
+        AND cp.CreatedDate >= ms.StartDate
+        AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+    ))
     AND (
       @Source IS NULL
       OR (@Source = N'' AND cp.Source IS NULL)

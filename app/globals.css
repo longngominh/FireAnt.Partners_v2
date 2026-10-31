@@ -17,6 +17,7 @@
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
   --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
@@ -47,6 +48,21 @@
   --color-info-foreground: var(--info-foreground);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* Hạng CTV: mark = màu nhận diện (biểu đồ, chấm), soft/border/fg = chip & thẻ. */
+  --color-tier-silver: var(--tier-silver);
+  --color-tier-silver-soft: var(--tier-silver-soft);
+  --color-tier-silver-border: var(--tier-silver-border);
+  --color-tier-silver-fg: var(--tier-silver-fg);
+  --color-tier-gold: var(--tier-gold);
+  --color-tier-gold-soft: var(--tier-gold-soft);
+  --color-tier-gold-border: var(--tier-gold-border);
+  --color-tier-gold-fg: var(--tier-gold-fg);
+  --color-tier-diamond: var(--tier-diamond);
+  --color-tier-diamond-soft: var(--tier-diamond-soft);
+  --color-tier-diamond-border: var(--tier-diamond-border);
+  --color-tier-diamond-fg: var(--tier-diamond-fg);
+  --color-admin-chip: var(--admin-chip);
+  --color-admin-chip-foreground: var(--admin-chip-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -57,37 +73,37 @@
 }
 
 :root {
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0.12 0.01 265);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.12 0.01 265);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.12 0.01 265);
+  --background: #f7f8fa;
+  --foreground: #101828;
+  --card: #ffffff;
+  --card-foreground: #101828;
+  --popover: #ffffff;
+  --popover-foreground: #101828;
 
-  /* Indigo-blue primary — fintech feel */
-  --primary: oklch(0.47 0.23 264);
-  --primary-foreground: oklch(0.985 0 0);
+  /* Xanh FireAnt (logo) */
+  --primary: #1570ef;
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.96 0.008 265);
-  --secondary-foreground: oklch(0.22 0.02 265);
-  --muted: oklch(0.96 0.005 265);
-  --muted-foreground: oklch(0.50 0.01 265);
-  --accent: oklch(0.94 0.01 265);
-  --accent-foreground: oklch(0.22 0.02 265);
-  --destructive: oklch(0.577 0.245 27.325);
+  --secondary: #f2f4f7;
+  --secondary-foreground: #1d2939;
+  --muted: #f2f4f7;
+  --muted-foreground: #475467;
+  --accent: #f2f4f7;
+  --accent-foreground: #1d2939;
+  --destructive: #d92d20;
 
-  --success: oklch(0.60 0.17 150);
-  --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.73 0.15 75);
-  --warning-foreground: oklch(0.18 0 0);
-  --info: oklch(0.55 0.17 250);
-  --info-foreground: oklch(0.985 0 0);
+  --success: #067647;
+  --success-foreground: #ffffff;
+  --warning: #b54708;
+  --warning-foreground: #ffffff;
+  --info: #175cd3;
+  --info-foreground: #ffffff;
   --brand: oklch(0.64 0.22 38);
   --brand-foreground: oklch(0.985 0 0);
 
-  --border: oklch(0.90 0.01 265);
-  --input: oklch(0.92 0.008 265);
-  --ring: oklch(0.47 0.23 264 / 40%);
+  --border: #e4e7ec;
+  --input: #d0d5dd;
+  --ring: rgb(21 112 239 / 35%);
 
   --chart-1: oklch(0.64 0.22 38);
   --chart-2: oklch(0.60 0.17 150);
@@ -96,49 +112,65 @@
   --chart-5: oklch(0.53 0.23 305);
   --radius: 0.625rem;
 
-  /* Sidebar — subtle cool-white tint */
-  --sidebar: oklch(0.975 0.004 265);
-  --sidebar-foreground: oklch(0.12 0.01 265);
-  --sidebar-primary: oklch(0.47 0.23 264);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.93 0.01 265);
-  --sidebar-accent-foreground: oklch(0.47 0.23 264);
-  --sidebar-border: oklch(0.90 0.01 265);
-  --sidebar-ring: oklch(0.47 0.23 264 / 40%);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #344054;
+  --sidebar-muted: #475467;
+  --sidebar-primary: #1570ef;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eff8ff;
+  --sidebar-accent-foreground: #175cd3;
+  --sidebar-border: #e4e7ec;
+  --sidebar-ring: rgb(21 112 239 / 35%);
+
+  /* Màu mark đã chạy qua bộ kiểm tra màu dataviz (phân biệt được cả khi mù màu). */
+  --tier-silver: #3f87c9;
+  --tier-silver-soft: #eef4fa;
+  --tier-silver-border: #c9dcef;
+  --tier-silver-fg: #22507a;
+  --tier-gold: #dc9200;
+  --tier-gold-soft: #fff7e6;
+  --tier-gold-border: #f7d9a0;
+  --tier-gold-fg: #8a4b00;
+  --tier-diamond: #8f3dd6;
+  --tier-diamond-soft: #f6effe;
+  --tier-diamond-border: #dfc9f7;
+  --tier-diamond-fg: #5b1f9e;
+
+  --admin-chip: #fef0c7;
+  --admin-chip-foreground: #7a2e0e;
 }
 
 .dark {
-  --background: oklch(0.12 0.01 265);
-  --foreground: oklch(0.965 0.005 265);
-  --card: oklch(0.17 0.01 265);
-  --card-foreground: oklch(0.965 0.005 265);
-  --popover: oklch(0.17 0.01 265);
-  --popover-foreground: oklch(0.965 0.005 265);
+  --background: #0b0e14;
+  --foreground: #f2f4f7;
+  --card: #121620;
+  --card-foreground: #f2f4f7;
+  --popover: #161b26;
+  --popover-foreground: #f2f4f7;
 
-  /* Lighter indigo for dark mode */
-  --primary: oklch(0.68 0.19 264);
-  --primary-foreground: oklch(0.12 0.01 265);
+  --primary: #5a9cff;
+  --primary-foreground: #0b1220;
 
-  --secondary: oklch(0.23 0.015 265);
-  --secondary-foreground: oklch(0.965 0.005 265);
-  --muted: oklch(0.23 0.015 265);
-  --muted-foreground: oklch(0.62 0.01 265);
-  --accent: oklch(0.26 0.02 265);
-  --accent-foreground: oklch(0.965 0.005 265);
-  --destructive: oklch(0.704 0.191 22.216);
+  --secondary: #1d2433;
+  --secondary-foreground: #f2f4f7;
+  --muted: #1a2030;
+  --muted-foreground: #a4adbd;
+  --accent: #1d2433;
+  --accent-foreground: #f2f4f7;
+  --destructive: #f97066;
 
-  --success: oklch(0.68 0.18 150);
-  --success-foreground: oklch(0.12 0.01 265);
-  --warning: oklch(0.80 0.14 75);
-  --warning-foreground: oklch(0.12 0.01 265);
-  --info: oklch(0.65 0.17 250);
-  --info-foreground: oklch(0.12 0.01 265);
+  --success: #47cd89;
+  --success-foreground: #0b1220;
+  --warning: #fdb022;
+  --warning-foreground: #0b1220;
+  --info: #84adff;
+  --info-foreground: #0b1220;
   --brand: oklch(0.70 0.21 38);
   --brand-foreground: oklch(0.12 0.01 265);
 
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.68 0.19 264 / 50%);
+  --border: rgb(255 255 255 / 9%);
+  --input: rgb(255 255 255 / 14%);
+  --ring: rgb(90 156 255 / 50%);
 
   --chart-1: oklch(0.70 0.21 38);
   --chart-2: oklch(0.68 0.18 150);
@@ -146,15 +178,45 @@
   --chart-4: oklch(0.80 0.14 75);
   --chart-5: oklch(0.63 0.22 305);
 
-  /* Sidebar — slightly lighter than content area */
-  --sidebar: oklch(0.155 0.012 265);
-  --sidebar-foreground: oklch(0.965 0.005 265);
-  --sidebar-primary: oklch(0.68 0.19 264);
-  --sidebar-primary-foreground: oklch(0.12 0.01 265);
-  --sidebar-accent: oklch(0.26 0.02 265);
-  --sidebar-accent-foreground: oklch(0.68 0.19 264);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.68 0.19 264 / 50%);
+  --sidebar: #0f131c;
+  --sidebar-foreground: #cfd5df;
+  --sidebar-muted: #a4adbd;
+  --sidebar-primary: #5a9cff;
+  --sidebar-primary-foreground: #0b1220;
+  --sidebar-accent: rgb(90 156 255 / 14%);
+  --sidebar-accent-foreground: #a6c8ff;
+  --sidebar-border: rgb(255 255 255 / 8%);
+  --sidebar-ring: rgb(90 156 255 / 50%);
+
+  --tier-silver: #3f87c9;
+  --tier-silver-soft: rgb(63 135 201 / 16%);
+  --tier-silver-border: rgb(63 135 201 / 40%);
+  --tier-silver-fg: #a9cdf0;
+  --tier-gold: #c08000;
+  --tier-gold-soft: rgb(220 146 0 / 14%);
+  --tier-gold-border: rgb(220 146 0 / 38%);
+  --tier-gold-fg: #f5c870;
+  --tier-diamond: #8f3dd6;
+  --tier-diamond-soft: rgb(143 61 214 / 20%);
+  --tier-diamond-border: rgb(166 104 230 / 45%);
+  --tier-diamond-fg: #d3b0f7;
+
+  --admin-chip: rgb(253 176 34 / 16%);
+  --admin-chip-foreground: #fec84b;
+}
+
+/* Bảng quản trị: nền thanh bên khác cổng CTV ở cả hai giao diện để không nhầm không gian. */
+[data-workspace="admin"] {
+  --sidebar: #f2f4f7;
+  --sidebar-accent: #ffffff;
+  --sidebar-border: #e4e7ec;
+}
+
+.dark [data-workspace="admin"] {
+  --sidebar: #080b11;
+  --sidebar-accent: rgb(255 255 255 / 8%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 7%);
 }
 
 @layer base {
@@ -177,12 +239,70 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
   }
-  .sidebar-nav-active {
-    @apply bg-sidebar-accent text-sidebar-accent-foreground font-semibold border-l-2 border-sidebar-primary;
+}
+
+/* Sơ đồ đội dạng cây (bảng quản trị): ul/li lồng nhau, đường nối vẽ bằng ::before/::after. */
+@layer components {
+  .org-tree {
+    --org-line: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
   }
-  .sidebar-nav-item {
-    @apply flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer;
-    @apply hover:bg-sidebar-accent hover:text-sidebar-accent-foreground;
-    @apply text-sidebar-foreground/70;
+  .org-tree ul {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    margin: 0;
+    padding: 1.25rem 0 0;
+    list-style: none;
+  }
+  .org-tree > ul {
+    padding-top: 0;
+  }
+  .org-tree li {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.25rem 0.375rem 0;
+  }
+  .org-tree li::before,
+  .org-tree li::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 50%;
+    width: 50%;
+    height: 1.25rem;
+    border-top: 1px solid var(--org-line);
+  }
+  .org-tree li::after {
+    right: auto;
+    left: 50%;
+    border-left: 1px solid var(--org-line);
+  }
+  .org-tree li:only-child::before,
+  .org-tree li:only-child::after {
+    display: none;
+  }
+  .org-tree li:only-child {
+    padding-top: 0;
+  }
+  .org-tree li:first-child::before,
+  .org-tree li:last-child::after {
+    border: 0 none;
+  }
+  .org-tree li:last-child::before {
+    border-right: 1px solid var(--org-line);
+    border-radius: 0 6px 0 0;
+  }
+  .org-tree li:first-child::after {
+    border-radius: 6px 0 0 0;
+  }
+  .org-tree ul ul::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: 1.25rem;
+    border-left: 1px solid var(--org-line);
   }
 }

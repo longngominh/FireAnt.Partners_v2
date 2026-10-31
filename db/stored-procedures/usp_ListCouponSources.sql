@@ -6,7 +6,8 @@
 -- Collation không phân biệt hoa/thường nên "zalo" và "Zalo" gộp làm một.
 -- =============================================================================
 CREATE OR ALTER PROCEDURE usp_ListCouponSources
-  @PartnerId INT = NULL
+  @PartnerId INT = NULL,
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -18,6 +19,13 @@ BEGIN
   FROM  Coupons cp
   WHERE cp.Source IS NOT NULL
     AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+        SELECT 1 FROM PartnerStaffMemberships ms
+        WHERE ms.PartnerId = @TeamOf
+          AND ms.StaffPartnerId = cp.PartnerId
+          AND cp.CreatedDate >= ms.StartDate
+          AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+      ))
   GROUP BY cp.Source
   ORDER BY MAX(cp.CreatedDate) DESC;
 END;

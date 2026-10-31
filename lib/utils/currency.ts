@@ -30,6 +30,25 @@ export function formatNumber(value: number | bigint | null | undefined): string 
   return NUMBER.format(value);
 }
 
+const ONE_DECIMAL = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const TWO_DECIMALS = new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Số tiền gọn kiểu người bán hàng hay nói: "168,5 tr", "1,77 tỷ". Dưới 1 triệu giữ
+ * nguyên dạng đầy đủ để không làm tròn mất tiền lẻ.
+ */
+export function formatShortVND(value: number | null | undefined): string {
+  const n = value ?? 0;
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${TWO_DECIMALS.format(n / 1_000_000_000)} tỷ`;
+  if (abs >= 1_000_000) return `${ONE_DECIMAL.format(n / 1_000_000)} tr`;
+  return formatVND(n);
+}
+
+export function formatPercent(rate: number, digits = 1): string {
+  return `${(rate * 100).toLocaleString("vi-VN", { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+}
+
 export function parseVNDInput(raw: string): number {
   const cleaned = raw.replace(/[^\d-]/g, "");
   const n = Number(cleaned);

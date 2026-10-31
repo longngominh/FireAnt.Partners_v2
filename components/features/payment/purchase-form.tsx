@@ -196,6 +196,8 @@ export function PurchaseForm({ packages, partnerId, onCreated, sourceSuggestions
       userName: account.userName,
       hasPhone: account.phoneSaved,
       maskedPhone: account.phoneSaved ? account.maskedPhone : null,
+      // Tài khoản vừa tạo thì chắc chắn chưa từng mua hội viên.
+      isReturningMember: false,
     });
   }
 

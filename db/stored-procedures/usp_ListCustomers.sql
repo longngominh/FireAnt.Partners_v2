@@ -32,7 +32,8 @@ CREATE OR ALTER PROCEDURE usp_ListCustomers
   @Offset     INT           = 0,
   @PageSize   INT           = 20,
   @Total      INT           = NULL OUTPUT,
-  @Source     NVARCHAR(50)  = NULL    -- NULL = mọi nguồn; N'' = khách chưa gắn nguồn
+  @Source     NVARCHAR(50)  = NULL,    -- NULL = mọi nguồn; N'' = khách chưa gắn nguồn
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -51,7 +52,14 @@ BEGIN
   FROM  Coupons cp
   INNER JOIN PaidByCoupon p ON p.CouponCode = cp.CouponCode
   WHERE cp.IsUsed = 1
-    AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId);
+    AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+        SELECT 1 FROM PartnerStaffMemberships ms
+        WHERE ms.PartnerId = @TeamOf
+          AND ms.StaffPartnerId = cp.PartnerId
+          AND cp.CreatedDate >= ms.StartDate
+          AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+      ));
 
   -- 2. Gộp theo khách. SourceRank = 1 ở đơn sớm nhất CÓ gắn nguồn (link cũ chưa có cột
   --    Source, hoặc CTV bỏ trống, xếp sau) → nguồn đã đưa khách về.
@@ -160,6 +168,7 @@ BEGIN
     m.MemberStartDate,
     m.MemberEndDate,
     m.LatestPackage,
+    pg.PartnerId,
     pu.Name AS PartnerName
   FROM #page pg
   OUTER APPLY (

@@ -50,6 +50,11 @@ export type CustomerLookup =
       userName: string;
       hasPhone: boolean;
       maskedPhone: string | null;
+      /**
+       * Đã từng có đơn gói hội viên đã thanh toán (mọi kênh) → đơn mua gói này không phải
+       * "khách mua lần đầu", không tính vào doanh số xếp hạng CTV. null = chưa tra.
+       */
+      isReturningMember: boolean | null;
     }
   | { status: "new-email"; input: string; email: string }
   | { status: "invalid"; input: string; error: string };

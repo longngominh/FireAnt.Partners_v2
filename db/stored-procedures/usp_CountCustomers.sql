@@ -14,7 +14,8 @@
 -- =============================================================================
 CREATE OR ALTER PROCEDURE usp_CountCustomers
   @PartnerId INT           = NULL,
-  @Q         NVARCHAR(200) = NULL    -- truyền dạng '%keyword%' từ app
+  @Q         NVARCHAR(200) = NULL,    -- truyền dạng '%keyword%' từ app
+  @TeamOf    INT           = NULL    -- đối tác: gồm cả link của nhân viên trong thời gian được ghi nhận
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -32,7 +33,14 @@ BEGIN
   FROM  Coupons cp
   INNER JOIN PaidByCoupon p ON p.CouponCode = cp.CouponCode
   WHERE cp.IsUsed = 1
-    AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId);
+    AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId)
+      AND (@TeamOf IS NULL OR cp.PartnerId = @TeamOf OR EXISTS (
+        SELECT 1 FROM PartnerStaffMemberships ms
+        WHERE ms.PartnerId = @TeamOf
+          AND ms.StaffPartnerId = cp.PartnerId
+          AND cp.CreatedDate >= ms.StartDate
+          AND (ms.EndDate IS NULL OR cp.CreatedDate < ms.EndDate)
+      ));
 
   SELECT o.UserName, c.PartnerId
   INTO   #agg

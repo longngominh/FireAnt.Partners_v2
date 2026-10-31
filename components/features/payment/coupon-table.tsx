@@ -16,7 +16,17 @@ import { isUpgradePaymentLink } from "@/lib/payment/upgrade-link";
 import { StatusBadge } from "./status-badge";
 import { CouponRowActions } from "./coupon-row-actions";
 
-export function CouponTable({ rows }: { rows: Coupon[] }) {
+export function CouponTable({
+  rows,
+  partnerLabels,
+  sellerHeader = "Đối tác",
+}: {
+  rows: Coupon[];
+  /** Tên người tạo link theo partnerId — có thì hiện thêm một cột (quản trị, hoặc đối tác xem link nhân viên). */
+  partnerLabels?: Record<number, string>;
+  /** Tiêu đề cột người tạo. */
+  sellerHeader?: string;
+}) {
   if (rows.length === 0) {
     return (
       <Card className="flex flex-col items-center justify-center gap-2 border-dashed py-16 text-center">
@@ -35,6 +45,7 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
             <TableHead className="w-[140px]">Mã</TableHead>
+            {partnerLabels ? <TableHead>{sellerHeader}</TableHead> : null}
             <TableHead>Tài khoản</TableHead>
             <TableHead className="text-right">Số tiền</TableHead>
             <TableHead>Trạng thái</TableHead>
@@ -66,6 +77,11 @@ export function CouponTable({ rows }: { rows: Coupon[] }) {
                   ) : null}
                 </div>
               </TableCell>
+              {partnerLabels ? (
+                <TableCell>
+                  <span className="text-sm">{partnerLabels[coupon.partnerId] ?? `#${coupon.partnerId}`}</span>
+                </TableCell>
+              ) : null}
               <TableCell>
                 <span className="text-sm font-medium">
                   {coupon.userName ?? (

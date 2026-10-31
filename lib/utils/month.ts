@@ -58,3 +58,26 @@ export function formatMonthRangeLabel(month: MonthKey): string {
     `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   return `${dmy(start)} – ${dmy(lastDay)}`;
 }
+
+/** "01/10/2026" — ngày bắt đầu của tháng, dùng cho "áp dụng từ …". */
+export function formatMonthStart(month: MonthKey): string {
+  const { year, month: monthNumber } = parseMonthKey(month);
+  return `01/${String(monthNumber).padStart(2, "0")}/${year}`;
+}
+
+/** "T10/2026" — nhãn tháng ngắn cho bảng và biểu đồ. */
+export function formatMonthShort(month: MonthKey): string {
+  const { year, month: monthNumber } = parseMonthKey(month);
+  return `T${monthNumber}/${year}`;
+}
+
+/** "28/10/2026" theo giờ máy chủ (dd/MM/yyyy). */
+export function formatDay(date: Date | null | undefined): string {
+  if (!date) return "—";
+  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+}
+
+/** `count` tháng gần nhất tính tới `lastMonth` (cũ → mới). */
+export function recentMonthKeys(lastMonth: MonthKey, count: number): MonthKey[] {
+  return Array.from({ length: count }, (_, i) => shiftMonth(lastMonth, i - count + 1));
+}

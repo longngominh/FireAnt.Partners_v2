@@ -16,7 +16,9 @@ import { createCoupon } from "@/lib/data/payment";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
+import { getStaffAffiliation } from "@/lib/data/staff";
 import { findFireAntUser, setFireAntUserPhoneIfEmpty } from "@/lib/data/identity";
+import { hasPaidMembership } from "@/lib/data/revenue-breakdown";
 import {
   countAccountsCreatedBy,
   logCustomerAccountAction,
@@ -151,6 +153,28 @@ async function resolvePartner(
         fieldErrors: { partnerId: ["Đối tác không hợp lệ"] },
       },
     };
+  }
+
+  // Nhân viên của đối tác chỉ tạo link khi đang được ghi nhận cho đối tác.
+  if (session.user.role === "staff") {
+    const affiliation = await getStaffAffiliation(Number(partnerId));
+    if (!affiliation?.isActive) {
+      return {
+        error: {
+          ok: false,
+          error: "Bạn không còn được ghi nhận cho đối tác nào nên không tạo được link mới.",
+        },
+      };
+    }
+    const parent = await getPartner(affiliation.partnerId);
+    if (!parent?.isActive) {
+      return {
+        error: {
+          ok: false,
+          error: `Đối tác ${affiliation.partnerName} đang tạm dừng hợp tác với FireAnt nên chưa tạo được link mới.`,
+        },
+      };
+    }
   }
 
   return { partnerId };
@@ -482,6 +506,7 @@ export async function lookupCustomerAction(rawInput: string): Promise<CustomerLo
         userName: user.userName,
         hasPhone: !!user.phoneNumber,
         maskedPhone: maskPhone(user.phoneNumber),
+        isReturningMember: await hasPaidMembership(user.userName),
       };
     }
     if (isEmailLike(input)) return { status: "new-email", input, email: input.toLowerCase() };

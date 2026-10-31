@@ -1,120 +1,233 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Building2Icon, CheckIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
-  LayoutDashboardIcon,
-  LinkIcon,
-  TicketIcon,
-  UsersIcon,
-  UserRoundXIcon,
-  ShieldIcon,
-  WalletIcon,
-} from "lucide-react";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import {
+  NAV_BY_WORKSPACE,
+  isNavActive,
+  type NavBadgeKey,
+  type Workspace,
+} from "./nav";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  exact?: boolean;
+export type ShellIdentity = {
+  name: string;
+  email: string;
+  /** "Hạng Vàng · từ 01/10/2026", "Nhân viên · Trần Minh Anh" hoặc "Quản lý FireAnt". */
+  roleLabel: string;
 };
 
-const partnerNav: NavItem[] = [
-  { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboardIcon, exact: true },
-  { href: "/payment/create", label: "Tạo link thanh toán", icon: LinkIcon },
-  { href: "/payment", label: "Link thanh toán đã tạo", icon: TicketIcon, exact: true },
-  { href: "/payment/pending-account", label: "Đơn chờ tài khoản", icon: UserRoundXIcon },
-  { href: "/customers", label: "Khách hàng", icon: UsersIcon },
-];
+export type SidebarProps = {
+  workspace: Workspace;
+  identity: ShellIdentity;
+  /** Người dùng có cả hai không gian (quản lý kiêm CTV) → hiện bộ chuyển. */
+  canSwitch: boolean;
+  badges?: Partial<Record<NavBadgeKey, number>>;
+  /** Phần tử render sẵn ở server (vd thẻ hạng), đặt cuối thanh bên. */
+  footer?: React.ReactNode;
+};
 
-const adminNav: NavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon, exact: true },
-  { href: "/admin/partners", label: "Quản lý CTV", icon: ShieldIcon },
-  { href: "/admin/revenue", label: "Doanh thu & hoa hồng", icon: WalletIcon },
-];
-
-function isActive(pathname: string, href: string, exact?: boolean): boolean {
-  const cleanHref = href.split("?")[0];
-  if (exact) return pathname === cleanHref;
-  return pathname === cleanHref || pathname.startsWith(`${cleanHref}/`);
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[words.length - 2][0] + words[words.length - 1][0]).toUpperCase();
 }
 
-function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
-  const Icon = item.icon;
-  const active = isActive(pathname, item.href, item.exact);
+function WorkspaceCard({ workspace, identity }: { workspace: Workspace; identity: ShellIdentity }) {
+  if (workspace === "admin") {
+    return (
+      <>
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-admin-chip text-admin-chip-foreground">
+          <Building2Icon className="size-4.5" />
+        </span>
+        <span className="flex min-w-0 flex-col text-left leading-tight">
+          <span className="truncate text-sm font-semibold text-foreground">Bảng quản trị</span>
+          <span className="truncate text-xs text-sidebar-muted">Toàn hệ thống</span>
+        </span>
+      </>
+    );
+  }
   return (
-    <Link
-      href={item.href}
-      className={cn(
-        "flex items-center gap-3 rounded-md py-2 pr-3 pl-3 text-sm transition-all duration-150",
-        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        active
-          ? "border-l-2 border-sidebar-primary bg-sidebar-accent pl-[10px] font-semibold text-sidebar-accent-foreground"
-          : "font-medium text-sidebar-foreground/70",
-      )}
-    >
-      <Icon
-        className={cn(
-          "size-4 shrink-0 transition-colors",
-          active ? "text-sidebar-primary" : "text-sidebar-foreground/50",
-        )}
-      />
-      <span className="truncate">{item.label}</span>
-    </Link>
+    <>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/12 text-xs font-bold text-primary">
+        {initials(identity.name)}
+      </span>
+      <span className="flex min-w-0 flex-col text-left leading-tight">
+        <span className="truncate text-sm font-semibold text-foreground">{identity.name}</span>
+        <span className="truncate text-xs text-sidebar-muted">{identity.roleLabel}</span>
+      </span>
+    </>
   );
 }
 
-export function Sidebar({ role }: { role: string }) {
-  const pathname = usePathname();
-  const isAdmin = role === "admin";
+function WorkspaceSwitcher({
+  workspace,
+  identity,
+  canSwitch,
+}: Pick<SidebarProps, "workspace" | "identity" | "canSwitch">) {
+  const cardClass =
+    "flex w-full items-center gap-2.5 rounded-xl border border-sidebar-border bg-background/60 p-2 transition-colors";
+
+  if (!canSwitch) {
+    return (
+      <div className={cardClass}>
+        <WorkspaceCard workspace={workspace} identity={identity} />
+      </div>
+    );
+  }
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
-      {/* Brand header */}
-      <Link href="/" className="flex h-14 items-center gap-2.5 border-b px-4 hover:bg-sidebar-accent/50 transition-colors">
-        <Image src="/logo.png" alt="FireAnt" width={30} height={30} className="rounded-lg shadow-sm" />
-        <div className="flex flex-col leading-none">
-          <span className="text-sm font-bold tracking-tight">FireAnt</span>
-          <span className="text-[11px] font-medium text-sidebar-primary/70">Partners</span>
-        </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(cardClass, "cursor-pointer hover:bg-sidebar-accent/60 focus-visible:ring-3 focus-visible:ring-ring/50 outline-none")}
+          aria-label="Đổi không gian làm việc"
+        >
+          <WorkspaceCard workspace={workspace} identity={identity} />
+          <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-sidebar-muted" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Không gian làm việc
+        </DropdownMenuLabel>
+        <DropdownMenuItem asChild className="cursor-pointer gap-2.5 py-2">
+          <Link href="/admin">
+            <Building2Icon />
+            <span className="flex flex-col leading-tight">
+              <span className="font-medium">Bảng quản trị FireAnt</span>
+              <span className="text-xs text-muted-foreground">Đối tác, nhân viên, chi trả</span>
+            </span>
+            {workspace === "admin" ? <CheckIcon className="ml-auto text-primary" /> : null}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="cursor-pointer gap-2.5 py-2">
+          <Link href="/dashboard">
+            <span className="flex size-4 items-center justify-center text-[9px] font-bold">
+              {initials(identity.name)}
+            </span>
+            <span className="flex flex-col leading-tight">
+              <span className="font-medium">Cổng đối tác của tôi</span>
+              <span className="text-xs text-muted-foreground">Link, khách và thu nhập của bạn</span>
+            </span>
+            {workspace !== "admin" ? <CheckIcon className="ml-auto text-primary" /> : null}
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function SidebarContent({
+  workspace,
+  identity,
+  canSwitch,
+  badges,
+  footer,
+  onNavigate,
+}: SidebarProps & { onNavigate?: () => void }) {
+  const pathname = usePathname();
+  const sections = NAV_BY_WORKSPACE[workspace];
+  const home = workspace === "admin" ? "/admin" : "/dashboard";
+
+  return (
+    <div className="flex min-h-full flex-col gap-5 px-3 py-4">
+      <Link href={home} onClick={onNavigate} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1">
+        <Image src="/logo.png" alt="" width={30} height={30} className="rounded-lg" />
+        <span className="flex flex-col leading-none">
+          <span className="text-[15px] font-bold tracking-tight text-foreground">FireAnt</span>
+          <span className="text-xs font-medium text-sidebar-muted">Partners</span>
+        </span>
+        {workspace === "admin" ? (
+          <span className="ml-auto rounded-md bg-admin-chip px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-admin-chip-foreground">
+            QUẢN TRỊ
+          </span>
+        ) : null}
       </Link>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-5">
-        {isAdmin && (
-          <>
-            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
-              Quản trị
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {adminNav.map((item) => (
-                <NavLink key={item.href} item={item} pathname={pathname} />
-              ))}
-            </div>
-          </>
-        )}
+      <WorkspaceSwitcher workspace={workspace} identity={identity} canSwitch={canSwitch} />
 
-        <div className={isAdmin ? "mt-5" : ""}>
-          <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
-            Đối tác
+      {workspace !== "admin" ? (
+        <Button asChild className="h-10 w-full rounded-lg text-sm font-semibold">
+          <Link href="/payment/create" onClick={onNavigate}>
+            <PlusIcon className="size-4.5" />
+            Tạo link bán hàng
+          </Link>
+        </Button>
+      ) : null}
+
+      <nav
+        aria-label={
+          workspace === "admin"
+            ? "Điều hướng quản trị"
+            : workspace === "staff"
+              ? "Điều hướng nhân viên bán hàng"
+              : "Điều hướng đối tác"
+        }
+        className="flex flex-col gap-4"
+      >
+        {sections.map((section) => (
+          <div key={section.label} className="flex flex-col gap-0.5">
+            <span className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-muted">
+              {section.label}
+            </span>
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              const active = isNavActive(pathname, item.href, item.exact);
+              const count = item.badge ? badges?.[item.badge] ?? 0 : 0;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors",
+                    active
+                      ? "bg-sidebar-accent font-semibold text-sidebar-accent-foreground shadow-xs"
+                      : "font-medium text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <Icon className={cn("size-4 shrink-0", active ? "" : "text-sidebar-muted")} />
+                  <span className="truncate">{item.label}</span>
+                  {count > 0 ? (
+                    <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-admin-chip px-1.5 text-xs font-semibold text-admin-chip-foreground">
+                      {count}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
-          <div className="flex flex-col gap-0.5">
-            {partnerNav.map((item) => (
-              <NavLink key={item.href} item={item} pathname={pathname} />
-            ))}
-          </div>
-        </div>
+        ))}
       </nav>
 
-      {/* Sidebar footer accent */}
-      <div className="border-t px-4 py-3">
-        <div className="rounded-md bg-sidebar-accent/60 px-3 py-2">
-          <p className="text-[10px] font-medium text-sidebar-foreground/50">
-            FireAnt Partners v2
-          </p>
-        </div>
-      </div>
+      {footer ? <div className="mt-auto pt-2">{footer}</div> : null}
+    </div>
+  );
+}
+
+export function Sidebar(props: SidebarProps) {
+  return (
+    <aside
+      data-workspace={props.workspace}
+      className="sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:block"
+    >
+      <SidebarContent {...props} />
     </aside>
   );
 }

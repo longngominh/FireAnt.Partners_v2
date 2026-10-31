@@ -319,6 +319,7 @@ export function UpgradeForm({ partnerId, onCreated, onSuggestPurchase, sourceSug
                   userName: eligible.userName,
                   hasPhone: eligible.hasPhone,
                   maskedPhone: eligible.maskedPhone,
+                  isReturningMember: true,
                 }}
                 value={customerPhone}
                 onChange={setCustomerPhone}

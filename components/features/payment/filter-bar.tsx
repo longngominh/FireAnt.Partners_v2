@@ -21,8 +21,17 @@ const STATUS_OPTIONS = [
   { value: "USED",    label: "Đã sử dụng" },
 ];
 
-/** sources: các nguồn khách đã gắn cho link (bỏ trống thì không hiện ô lọc nguồn). */
-export function FilterBar({ sources = [] }: { sources?: string[] }) {
+/**
+ * sources: các nguồn khách đã gắn cho link (bỏ trống thì không hiện ô lọc nguồn).
+ * partners: bảng quản trị — thêm ô lọc theo đối tác (tham số `partner`).
+ */
+export function FilterBar({
+  sources = [],
+  partners,
+}: {
+  sources?: string[];
+  partners?: Array<{ id: number; label: string }>;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -30,6 +39,7 @@ export function FilterBar({ sources = [] }: { sources?: string[] }) {
 
   const q = params.get("q") ?? "";
   const status = params.get("status") ?? "ALL";
+  const partner = params.get("partner") ?? "ALL";
   const searchTimeoutRef = useRef<number | null>(null);
 
   const replaceSearchParams = useCallback((sp: URLSearchParams) => {
@@ -87,6 +97,21 @@ export function FilterBar({ sources = [] }: { sources?: string[] }) {
           className="pl-9"
         />
       </div>
+      {partners ? (
+        <Select value={partner} onValueChange={(v) => update({ partner: v })}>
+          <SelectTrigger className="w-full md:w-56" aria-label="Lọc theo đối tác">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Mọi đối tác</SelectItem>
+            {partners.map((p) => (
+              <SelectItem key={p.id} value={String(p.id)}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
       <SourceFilter sources={sources} />
       <Select value={status} onValueChange={(v) => update({ status: v })}>
         <SelectTrigger className="w-full md:w-48">

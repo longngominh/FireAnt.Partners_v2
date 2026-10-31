@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getPartner } from "@/lib/data/partners";
 import { listCoupons, createCoupon, type CouponStatus } from "@/lib/data/payment";
+import { getStaffAffiliation } from "@/lib/data/staff";
 import { generateShortCode, buildShortLink } from "@/lib/utils/shortcode";
 import { qrToDataUrl } from "@/lib/utils/qr";
 import { createPaymentSchema } from "@/lib/validations/payment";
@@ -48,6 +50,18 @@ export async function POST(request: NextRequest) {
       { error: "Tài khoản chưa được gán đối tác — không thể tạo link." },
       { status: 400 },
     );
+  }
+
+  // Nhân viên của đối tác chỉ tạo link khi đang được ghi nhận và đối tác còn hoạt động (như /payment/create).
+  if (session.user.role === "staff") {
+    const affiliation = await getStaffAffiliation(Number(partnerId));
+    const parent = affiliation?.isActive ? await getPartner(affiliation.partnerId) : null;
+    if (!parent?.isActive) {
+      return NextResponse.json(
+        { error: "Tài khoản không còn được ghi nhận cho đối tác đang hoạt động nên không tạo được link mới." },
+        { status: 403 },
+      );
+    }
   }
 
   let body: unknown;

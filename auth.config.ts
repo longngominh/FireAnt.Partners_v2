@@ -57,13 +57,22 @@ export const authConfig = {
 
       if (isPublic) {
         if (isLoggedIn && path === "/login") {
-          const dest = auth?.user?.role === "admin" ? "/admin" : "/dashboard";
+          const role = auth?.user?.role;
+          const dest = role === "admin" ? "/admin" : role === "applicant" ? "/status" : "/dashboard";
           return Response.redirect(new URL(dest, request.nextUrl));
         }
         return true;
       }
 
       if (!isLoggedIn) return false;
+
+      // Người được đề xuất làm nhân viên (chờ duyệt / bị từ chối) chưa có partnerId: chỉ được xem
+      // trang trạng thái. Chặn cả API — các API cũ coi partnerId rỗng là toàn hệ thống.
+      if (auth?.user?.role === "applicant") {
+        if (path === "/status") return true;
+        if (path.startsWith("/api/")) return Response.json({ error: "Forbidden" }, { status: 403 });
+        return Response.redirect(new URL("/status", request.nextUrl));
+      }
 
       if (path.startsWith("/admin")) {
         return auth?.user?.role === "admin";

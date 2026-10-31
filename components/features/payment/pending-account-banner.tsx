@@ -9,13 +9,22 @@ import { countPaidOrdersWithoutAccount } from "@/lib/data/pending-accounts";
  * (~0,2–0,5s), nên component này được render trong <Suspense> để bảng coupon hiện ra ngay,
  * không chờ. Không có gì ở đây chặn nội dung chính của trang.
  */
-export async function PendingAccountBanner({ partnerId }: { partnerId: string | number | null }) {
-  const count = await countPaidOrdersWithoutAccount(partnerId);
+export async function PendingAccountBanner({
+  partnerId,
+  teamOf = null,
+  href = "/payment/pending-account",
+}: {
+  partnerId: string | number | null;
+  /** Đối tác: đếm cả đơn qua link của nhân viên. */
+  teamOf?: number | null;
+  href?: string;
+}) {
+  const count = await countPaidOrdersWithoutAccount(partnerId, teamOf);
   if (count <= 0) return null;
 
   return (
     <Link
-      href="/payment/pending-account"
+      href={href}
       className="flex items-center gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm transition-colors hover:bg-warning/15"
     >
       <UserRoundXIcon className="size-4 shrink-0 text-warning" />

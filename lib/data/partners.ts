@@ -2,13 +2,13 @@ import { getPool, sql } from "@/lib/db/sql";
 import {
   calcCommissionFromTotal,
   calcMonthlyRemuneration,
+  isPartnerStaffType,
   normalizePartnerType,
   PARTNER_TYPE_LABELS,
   type PartnerType,
   type RemunerationBreakdown,
 } from "@/lib/commission";
 import {
-  getTrendRowsByPartner,
   getTrendSeries,
   getTrendSinceDate,
   type TrendRange,
@@ -23,6 +23,8 @@ export type Partner = {
   isActive: boolean;
   partnerType: PartnerType;
   partnerTypeLabel: string;
+  /** Nhân viên bán hàng của một đối tác (PartnerType = partner_staff), không phải người ký hợp đồng. */
+  isStaff: boolean;
   underDiscountRate: number;
   aboveDiscountRate: number;
   revenueReference: number;
@@ -46,17 +48,6 @@ export type PartnerPerformance = {
   customerCount: number;
   conversionRate: number;
   monthlyRemuneration: RemunerationBreakdown;
-  monthlyTrend: Array<{ month: string; revenue: number; commission: number }>;
-};
-
-export type AdminDashboardPerformance = {
-  totalRevenue: number;
-  totalCommission: number;
-  couponCount: number;
-  paidCount: number;
-  pendingCount: number;
-  customerCount: number;
-  activePartnerCount: number;
   monthlyTrend: Array<{ month: string; revenue: number; commission: number }>;
 };
 
@@ -149,6 +140,7 @@ function mapPartner(r: PartnerRow): Partner {
     isActive: r.IsActive === true || r.IsActive === 1,
     partnerType,
     partnerTypeLabel: PARTNER_TYPE_LABELS[partnerType],
+    isStaff: isPartnerStaffType(r.PartnerType),
     underDiscountRate: underRate,
     aboveDiscountRate: aboveRate,
     revenueReference: ref,
@@ -289,94 +281,5 @@ export async function getPartnerPerformance(
   } catch (err) {
     console.error("[getPartnerPerformance]", err);
     return null;
-  }
-}
-
-/**
- * Số liệu dashboard admin cho một khung thời gian.
- *
- * Hoa hồng tính theo bậc của TỪNG partner nên không thể lấy từ doanh thu tổng —
- * cần doanh thu từng partner trong khung thời gian. Trước đây mỗi partner tốn
- * 2 stored procedure (stats + trend) → 1 + 2N lượt gọi (67 lượt với 33 partner).
- * Giờ chỉ 2 truy vấn: stats toàn cục + trend theo (partner, period); doanh thu
- * từng partner suy ra bằng cách cộng trend của partner đó (cùng bộ lọc).
- *
- * @param preloadedPartners Danh sách partner nếu trang đã tải sẵn, tránh gọi
- *   usp_ListPartners (nặng nhất trong các SP) hai lần trong một request.
- */
-export async function getAdminDashboardPerformance(
-  range: TrendRange,
-  preloadedPartners?: Partner[],
-): Promise<AdminDashboardPerformance> {
-  try {
-    const [pool, partners] = await Promise.all([
-      getPool(),
-      preloadedPartners ?? listPartners(),
-    ]);
-    const activePartners = partners.filter((p) => p.isActive);
-    const since = getTrendSinceDate(range);
-
-    const [stats, trendRows] = await Promise.all([
-      getPartnerStats(pool, null, since, true),
-      getTrendRowsByPartner(null, range, true),
-    ]);
-
-    const typeByPartnerId = new Map<number, PartnerType>(
-      activePartners.map((p) => [p.id, p.partnerType]),
-    );
-    const revenueByPartnerId = new Map<number, number>();
-    const trendByPeriod = new Map<string, { month: string; revenue: number; commission: number }>();
-
-    for (const row of trendRows) {
-      const partnerType = typeByPartnerId.get(row.partnerId);
-      // Partner không có trong danh sách (đã xoá/không còn active) → bỏ qua,
-      // giống hành vi cũ chỉ lặp qua activePartners.
-      if (!partnerType) continue;
-
-      revenueByPartnerId.set(
-        row.partnerId,
-        (revenueByPartnerId.get(row.partnerId) ?? 0) + row.revenue,
-      );
-
-      if (row.period === null) continue;
-      const commission = calcCommissionFromTotal(row.revenue, partnerType);
-      const existing = trendByPeriod.get(row.period);
-      if (existing) {
-        existing.revenue += row.revenue;
-        existing.commission += commission;
-      } else {
-        trendByPeriod.set(row.period, { month: row.period, revenue: row.revenue, commission });
-      }
-    }
-
-    let totalCommission = 0;
-    for (const [partnerId, revenue] of revenueByPartnerId) {
-      totalCommission += calcCommissionFromTotal(revenue, typeByPartnerId.get(partnerId)!);
-    }
-
-    return {
-      totalRevenue: stats.TotalRevenue,
-      totalCommission,
-      couponCount: stats.TotalCoupons,
-      paidCount: stats.PaidCoupons,
-      pendingCount: stats.PendingCoupons,
-      customerCount: stats.CustomerCount,
-      activePartnerCount: activePartners.length,
-      monthlyTrend: Array.from(trendByPeriod.values()).sort((a, b) =>
-        a.month.localeCompare(b.month),
-      ),
-    };
-  } catch (err) {
-    console.error("[getAdminDashboardPerformance]", err);
-    return {
-      totalRevenue: 0,
-      totalCommission: 0,
-      couponCount: 0,
-      paidCount: 0,
-      pendingCount: 0,
-      customerCount: 0,
-      activePartnerCount: 0,
-      monthlyTrend: [],
-    };
   }
 }
