@@ -8,8 +8,10 @@ import {
 } from "@/components/features/payment/create-payment-workspace";
 import { StaffEndedNotice } from "@/components/features/staff/staff-ended-notice";
 import { requirePortalSession } from "@/lib/auth/session";
-import { contractTierScheme } from "@/lib/commission";
+import { contractTierScheme, REPEAT_RATE, usesSplitPolicy } from "@/lib/commission";
 import { listPackages } from "@/lib/data/packages";
+import { formatPercent } from "@/lib/utils/currency";
+import { currentMonthKey } from "@/lib/utils/month";
 import { listCouponSources } from "@/lib/data/payment";
 import { getPortalAffiliation, getPortalContract } from "@/lib/data/portal";
 import { sourceSuggestions } from "@/lib/payment/source";
@@ -45,9 +47,13 @@ export default async function CreatePaymentPage({
                 affiliation ? ` và tính vào doanh thu của đối tác ${affiliation.partnerName}` : ""
               }.`
             : `Một bước tạo đơn, link rút gọn và QR chuyển khoản; gói kích hoạt tự động khi khách thanh toán. Khi nhập tài khoản khách, hệ thống báo ngay đơn là khách mới hay gia hạn${
-                contract && contract.tier !== "normal"
-                  ? ` — ${contractTierScheme(contract.tier)} chỉ tính phí/thù lao trên đơn khách mới`
-                  : ""
+                !contract
+                  ? ""
+                  : usesSplitPolicy(currentMonthKey())
+                    ? ` — khách mới tính theo ${contractTierScheme(contract.tier)}, gia hạn và nâng cấp ${formatPercent(REPEAT_RATE, 0)}`
+                    : contract.tier !== "normal"
+                      ? ` — ${contractTierScheme(contract.tier)} chỉ tính phí/thù lao trên đơn khách mới`
+                      : ""
               }.`
         }
         actions={

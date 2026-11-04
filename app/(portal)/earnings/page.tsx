@@ -5,7 +5,13 @@ import { MonthPicker } from "@/components/features/revenue/month-picker";
 import { TierSchedule } from "@/components/features/tiers/tier-schedule";
 import { TierBadge, TierMedallion, TIER_CLASSES } from "@/components/features/tiers/tier-ui";
 import { requirePartnerSession } from "@/lib/auth/session";
-import { contractTierScheme, contractTierTitle, PARTNER_TYPE_LABELS } from "@/lib/commission";
+import {
+  contractTierScheme,
+  contractTierTitle,
+  PARTNER_TYPE_LABELS,
+  REPEAT_RATE,
+  usesSplitPolicy,
+} from "@/lib/commission";
 import { explainRemuneration, payableAmount } from "@/lib/earnings/explain";
 import { getPartnerMonths } from "@/lib/data/partner-portal";
 import { getPartnerSummary, getPortalContract } from "@/lib/data/portal";
@@ -46,6 +52,9 @@ export default async function EarningsPage({
   const payout = payableAmount(r);
   const isTier = r.policy === "tier";
   const base = r.revenue;
+  // "Chính sách hiện tại" theo tháng hiện tại; từ SPLIT_POLICY_FROM biểu chỉ áp cho phần khách mới.
+  const splitNow = usesSplitPolicy(now);
+  const currentScheduleRevenue = month !== now ? null : r.split ? r.split.newRevenue : base;
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,7 +87,9 @@ export default async function EarningsPage({
                   <span className="text-sm">
                     {contract.effectiveMonth
                       ? `Áp dụng từ ${formatMonthStart(contract.effectiveMonth)} · cho cả tháng, tính từ ngày 01`
-                      : "Chưa ký phụ lục hạng · bậc lũy tiến trên doanh số gói hội viên"}
+                      : splitNow
+                        ? "Chưa ký phụ lục hạng · bậc lũy tiến trên khách mới"
+                        : "Chưa ký phụ lục hạng · bậc lũy tiến trên doanh số gói hội viên"}
                   </span>
                 </span>
               </div>
@@ -90,16 +101,21 @@ export default async function EarningsPage({
                 </dd>
                 <dt className="text-muted-foreground">Căn cứ tính</dt>
                 <dd className="font-medium">
-                  {contract.tier === "normal"
-                    ? "Doanh số gói hội viên trong tháng (khóa học thanh toán riêng)"
-                    : "Doanh thu khách mua gói hội viên lần đầu"}
+                  {splitNow
+                    ? `Khách mua gói hội viên lần đầu theo biểu; gia hạn, nâng cấp ${formatPercent(REPEAT_RATE, 0)} (khóa học thanh toán riêng)`
+                    : contract.tier === "normal"
+                      ? "Doanh số gói hội viên trong tháng (khóa học thanh toán riêng)"
+                      : "Doanh thu khách mua gói hội viên lần đầu"}
                 </dd>
               </dl>
               <div className="flex flex-col gap-2">
-                <span className="text-[13px] font-semibold">Biểu tính · {contractTierScheme(contract.tier)}</span>
+                <span className="text-[13px] font-semibold">
+                  Biểu tính{splitNow ? " khách mới" : ""} · {contractTierScheme(contract.tier)}
+                </span>
                 <TierSchedule
                   tier={contract.tier}
-                  revenue={month === now ? base : null}
+                  revenue={currentScheduleRevenue}
+                  repeatRate={splitNow ? REPEAT_RATE : null}
                 />
                 <span className="text-xs leading-5 text-muted-foreground">
                   Hạng chỉ đổi khi FireAnt cập nhật phụ lục mới bạn đã ký. Phụ lục mới áp dụng cho cả tháng, tính từ ngày 01.
@@ -123,9 +139,11 @@ export default async function EarningsPage({
                 <span className="text-[13px] text-muted-foreground">{isTier ? "Doanh thu tính thù lao" : "Doanh số tính thù lao"}</span>
                 <span className="num text-2xl font-bold">{formatVND(base)}</span>
                 <span className="text-xs text-muted-foreground">
-                  {isTier
-                    ? `Khách mua gói hội viên lần đầu · ${selected.total.new.customers} khách`
-                    : "Doanh số gói hội viên qua link, không gồm khóa học"}
+                  {r.split
+                    ? `Khách mới ${formatVND(r.split.newRevenue)} · gia hạn, nâng cấp ${formatVND(r.split.repeatRevenue)}`
+                    : isTier
+                      ? `Khách mua gói hội viên lần đầu · ${selected.total.new.customers} khách`
+                      : "Doanh số gói hội viên qua link, không gồm khóa học"}
                 </span>
               </div>
             </div>

@@ -4,7 +4,7 @@ import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelLink, StatCard } from "@/components/shared/panel";
 import { ContractChip } from "@/components/features/tiers/tier-ui";
-import { contractTierScheme, PARTNER_TYPE_LABELS } from "@/lib/commission";
+import { contractTierScheme, PARTNER_TYPE_LABELS, REPEAT_RATE } from "@/lib/commission";
 import { payableAmount } from "@/lib/earnings/explain";
 import { getPartnerMonths } from "@/lib/data/partner-portal";
 import { getLinkStats, getPortalContract, type PartnerSummary } from "@/lib/data/portal";
@@ -94,9 +94,13 @@ export async function PartnerOverview({ summary, name }: { summary: PartnerSumma
           label={current.remuneration.policy === "tier" ? "Doanh thu tính thù lao" : "Doanh số tính thù lao"}
           value={formatVND(base)}
           hint={
-            current.remuneration.policy === "tier"
-              ? `Khách mua gói hội viên lần đầu · chưa tính ${formatShortVND(otherRevenue(current.total))} gia hạn, khác`
-              : "Chính sách Thường: bậc lũy tiến trên doanh số gói hội viên"
+            current.remuneration.split
+              ? `Khách mới ${formatVND(current.remuneration.split.newRevenue)} theo biểu · gia hạn, nâng cấp ${formatVND(
+                  current.remuneration.split.repeatRevenue,
+                )} tính ${formatPercent(REPEAT_RATE, 0)}`
+              : current.remuneration.policy === "tier"
+                ? `Khách mua gói hội viên lần đầu · chưa tính ${formatShortVND(otherRevenue(current.total))} gia hạn, khác`
+                : "Chính sách Thường: bậc lũy tiến trên doanh số gói hội viên"
           }
         />
         <StatCard

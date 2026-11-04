@@ -8,7 +8,12 @@ import {
   calcPartnerRemuneration,
   CONTRACT_TIERS,
   contractTierScheme,
+  NEW_CUSTOMER_LAPSE_EXAMPLE,
+  NEW_CUSTOMER_LAPSE_MONTHS,
+  REPEAT_RATE,
+  SPLIT_POLICY_LABEL,
   TIER_APPENDIX,
+  usesSplitPolicy,
   type ContractTier,
 } from "@/lib/commission";
 import { getContractsForMonth } from "@/lib/data/contracts";
@@ -24,19 +29,23 @@ const LOOKUP = [30, 50, 80, 99, 100, 150, 199, 200, 250, 300].map((m) => m * 1_0
 const RULES: Array<{ title: string; body: string }> = [
   {
     title: "Phụ lục của đối tác",
-    body: "FireAnt chọn ở hồ sơ đối tác theo phụ lục đối tác đã ký. Phụ lục áp dụng cho cả tháng, tính từ ngày 01; muốn bắt đầu từ tháng sau thì đổi vào tháng đó. Các tháng trước giữ phụ lục đã dùng. Chưa chọn phụ lục là chính sách Thường.",
+    body: "FireAnt chọn ở hồ sơ đối tác theo phụ lục đối tác đã ký. Phụ lục áp dụng cho cả tháng, tính từ ngày 01; muốn bắt đầu từ tháng sau thì đổi vào tháng đó. Các tháng trước giữ phụ lục đã dùng. Chưa chọn phụ lục là chính sách Thường. Đổi chính sách phải báo đối tác trước ít nhất 15 ngày.",
   },
   {
-    title: "Căn cứ tính",
-    body: "Phụ lục Bạc, Vàng, Kim cương: doanh thu khách mua gói hội viên lần đầu trong tháng dương lịch — tài khoản chưa từng có đơn hội viên đã thanh toán ở bất kỳ kênh nào. Chính sách Thường: toàn bộ doanh số gói hội viên. Số tiền là thực thu sau mã khuyến mại.",
+    title: `Căn cứ tính từ ${SPLIT_POLICY_LABEL} — mọi hạng như nhau`,
+    body: `(a) Khách mua gói hội viên lần đầu tính theo biểu của hạng: Thường theo bậc lũy tiến, Bạc · Vàng · Kim cương theo biểu phụ lục; mốc doanh số chỉ xét khách mới. (b) Gia hạn, (c) nâng cấp và gói khác: ${Math.round(REPEAT_RATE * 100)}% ở mọi hạng, không cộng vào mốc. Số tiền là thực thu sau mã khuyến mại; đơn nâng cấp tính phần chênh lệch khách đã trả.`,
+  },
+  {
+    title: "Phân loại đơn",
+    body: `Khách mua lần đầu (từ ${SPLIT_POLICY_LABEL}): tài khoản chưa có gói hội viên trả phí nào ở mọi kênh FireAnt — gói dùng thử, gói 0 đồng không tính — hoặc khách quay lại khi gói trả phí gần nhất đã hết hạn đủ ${NEW_CUSTOMER_LAPSE_MONTHS} tháng tính tới ngày thanh toán, so theo ngày (vd ${NEW_CUSTOMER_LAPSE_EXAMPLE}). Các đơn gói hội viên khác là gia hạn. Trước ${SPLIT_POLICY_LABEL}, khách mua lần đầu là đơn gói hội viên đã thanh toán đầu tiên của tài khoản. Đối tác thấy loại đơn khi tạo link, ở trang Doanh số và trong bảng kê của giấy đề nghị.`,
+  },
+  {
+    title: `Trước ${SPLIT_POLICY_LABEL}`,
+    body: "Phụ lục Bạc, Vàng, Kim cương chỉ tính doanh thu khách mua lần đầu; gia hạn, nâng cấp chưa có biểu (điểm b, c của phụ lục). Chính sách Thường tính bậc lũy tiến trên toàn bộ doanh số gói hội viên. Các tháng này giữ nguyên cách tính cũ.",
   },
   {
     title: "Nhân viên của đối tác",
     body: "Doanh số qua link của nhân viên được cộng vào đối tác trong thời gian được ghi nhận (từ lúc FireAnt duyệt tới lúc ngừng hợp tác). Nhân viên không có hạng, không ký hợp đồng và không nhận thanh toán từ FireAnt.",
-  },
-  {
-    title: "Chưa tính theo phụ lục",
-    body: "Gia hạn, nâng cấp và gói khác vẫn ghi nhận doanh thu nhưng chưa có biểu theo phụ lục (điểm b, c của phụ lục). Bổ sung chính sách phải báo đối tác trước ít nhất 15 ngày.",
   },
   {
     title: "Khóa học",
@@ -54,12 +63,13 @@ const RULES: Array<{ title: string; body: string }> = [
 
 function payoutFor(tier: ContractTier, revenue: number) {
   // Bảng tra giả định toàn bộ doanh số là khách mới để so được các chính sách trên cùng một mức.
-  return calcPartnerRemuneration("collaborator", tier, { total: revenue, newCustomer: revenue });
+  return calcPartnerRemuneration("collaborator", tier, { total: revenue, newCustomer: revenue }, currentMonthKey());
 }
 
 export default async function AdminTiersPage() {
   await requireAdminSession();
   const [partners, contracts] = await Promise.all([listPartners(), getContractsForMonth(currentMonthKey())]);
+  const splitNow = usesSplitPolicy(currentMonthKey());
 
   const active = partners.filter((p) => p.isActive && !p.isStaff && p.partnerType === "collaborator");
   const counts = Object.fromEntries(CONTRACT_TIERS.map((t) => [t, 0])) as Record<ContractTier, number>;
@@ -95,12 +105,16 @@ export default async function AdminTiersPage() {
               </span>
             }
             description={
-              tier === "normal"
-                ? "Bậc lũy tiến trên doanh số gói hội viên trong tháng"
-                : "Trên doanh thu khách mua gói hội viên lần đầu, đúng bảng “Cách tính thù lao” của phụ lục"
+              splitNow
+                ? tier === "normal"
+                  ? "Bậc lũy tiến trên doanh số khách mới trong tháng; gia hạn, nâng cấp tính riêng"
+                  : "Trên doanh thu khách mua gói hội viên lần đầu, đúng bảng “Cách tính thù lao” của phụ lục; gia hạn, nâng cấp tính riêng"
+                : tier === "normal"
+                  ? `Bậc lũy tiến trên doanh số gói hội viên trong tháng (từ ${SPLIT_POLICY_LABEL}: trên khách mới)`
+                  : "Trên doanh thu khách mua gói hội viên lần đầu, đúng bảng “Cách tính thù lao” của phụ lục"
             }
           >
-            <TierSchedule tier={tier} />
+            <TierSchedule tier={tier} repeatRate={splitNow ? REPEAT_RATE : null} />
           </Panel>
         ))}
       </div>
@@ -109,7 +123,7 @@ export default async function AdminTiersPage() {
         <Panel
           className="lg:col-span-7"
           title="Bảng tra nhanh"
-          description="Phí/thù lao tháng theo từng chính sách, giả định cùng một mức doanh thu tính thù lao"
+          description="Phí/thù lao tháng theo từng chính sách, giả định toàn bộ là doanh thu khách mua lần đầu"
           flush
         >
           <div className="overflow-x-auto">

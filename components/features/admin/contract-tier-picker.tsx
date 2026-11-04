@@ -13,12 +13,18 @@ function pct(rate: number): string {
   return `${(rate * 100).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
 }
 
-/** Một dòng tóm tắt mốc cao nhất của biểu, vd "Từ 100 tr: phần vượt 18% + 5% tổng". */
-function tierHint(tier: ContractTier): string {
-  if (tier === "normal") return "Bậc lũy tiến hiện tại, trên doanh số gói hội viên";
+/**
+ * Một dòng tóm tắt biểu, vd "Từ 100 tr: phần vượt 18% + 5% tổng". Tháng tính theo loại đơn
+ * (`repeatRate`): biểu là của khách mới, gia hạn và nâng cấp tính chung một tỷ lệ.
+ */
+function tierHint(tier: ContractTier, repeatRate: number | null): string {
+  const repeat = repeatRate !== null ? `; gia hạn, nâng cấp ${pct(repeatRate)}` : "";
+  if (tier === "normal") {
+    return repeatRate !== null ? `Bậc lũy tiến trên khách mới${repeat}` : "Bậc lũy tiến hiện tại, trên doanh số gói hội viên";
+  }
   const schedule = TIER_SCHEDULES[tier];
   const top = schedule[schedule.length - 1];
-  return `Từ ${top.from / 1_000_000} tr: phần vượt ${pct(top.excessRate)} + ${pct(top.bonusRate)} tổng`;
+  return `Khách mới từ ${top.from / 1_000_000} tr: phần vượt ${pct(top.excessRate)} + ${pct(top.bonusRate)} tổng${repeat}`;
 }
 
 /**
@@ -31,6 +37,7 @@ export function ContractTierPicker({
   monthLabel,
   monthStart,
   fees,
+  repeatRate = null,
 }: {
   partnerId: number;
   current: ContractTier;
@@ -40,6 +47,8 @@ export function ContractTierPicker({
   monthStart: string;
   /** Phí/thù lao tạm tính tháng này nếu áp dụng từng phụ lục, đã định dạng. */
   fees: Record<ContractTier, string>;
+  /** Tỷ lệ gia hạn, nâng cấp khi tháng hiện tại tính theo loại đơn (từ SPLIT_POLICY_FROM). */
+  repeatRate?: number | null;
 }) {
   const router = useRouter();
   const [picked, setPicked] = useState<ContractTier>(current);
@@ -81,7 +90,7 @@ export function ContractTierPicker({
                 {CONTRACT_TIER_LABELS[tier]}
                 {tier === current ? <span className="text-xs font-medium text-muted-foreground">· đang áp dụng</span> : null}
               </span>
-              <span className="text-xs leading-5 text-muted-foreground">{tierHint(tier)}</span>
+              <span className="text-xs leading-5 text-muted-foreground">{tierHint(tier, repeatRate)}</span>
             </button>
           );
         })}

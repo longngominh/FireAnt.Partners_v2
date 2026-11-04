@@ -4,14 +4,20 @@ import { CircleCheckIcon, Loader2Icon, PhoneIcon, RefreshCwIcon, UserPlusIcon } 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NEW_CUSTOMER_LAPSE_MONTHS } from "@/lib/commission";
 import { PHONE_INVALID_MESSAGE, normalizeVnPhone } from "@/lib/payment/phone";
 import type { CustomerLookup } from "@/lib/payment/types";
 
-/** Chip báo đơn gói hội viên của khách này là khách mới (tính phí/thù lao theo phụ lục). */
-function NewCustomerChip() {
+/**
+ * Chip báo đơn gói hội viên của khách này là khách mới (tính theo biểu của hạng). `lapsedSince`:
+ * khách quay lại sau khi gói trả phí hết hạn đủ số tháng quy định.
+ */
+function NewCustomerChip({ lapsedSince = null }: { lapsedSince?: string | null }) {
   return (
     <p className="w-fit rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11px] font-semibold text-success">
-      Khách mới · mua gói hội viên lần đầu
+      {lapsedSince
+        ? `Khách quay lại · gói hết hạn từ ${lapsedSince}, tính như khách mới`
+        : "Khách mới · mua gói hội viên lần đầu"}
     </p>
   );
 }
@@ -49,10 +55,12 @@ export function CustomerLookupStatus({
             Tài khoản FireAnt: <strong className="font-semibold">{lookup.userName}</strong>
           </span>
         </p>
-        {lookup.isReturningMember === false ? <NewCustomerChip /> : null}
+        {lookup.isReturningMember === false ? <NewCustomerChip lapsedSince={lookup.lapsedSince} /> : null}
         {lookup.isReturningMember ? (
           <p className="w-fit rounded-full border bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-            Khách đã từng mua hội viên · đơn gói hội viên sẽ là gia hạn
+            {lookup.lapseRule
+              ? `Gói hội viên còn hạn hoặc hết hạn chưa đủ ${NEW_CUSTOMER_LAPSE_MONTHS} tháng · đơn gói hội viên sẽ là gia hạn`
+              : "Khách đã từng mua hội viên · đơn gói hội viên sẽ là gia hạn"}
           </p>
         ) : null}
       </div>

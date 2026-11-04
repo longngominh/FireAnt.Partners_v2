@@ -60,11 +60,12 @@ export async function GET(request: Request) {
         fullName: info?.fullName ?? row.name ?? row.username,
         username: row.username,
         partnerType: row.partnerType,
-        // Căn cứ tính: đối tác có phụ lục = DS khách mới; còn lại = DS trừ khóa học.
+        // Căn cứ tính: phụ lục trước SPLIT_POLICY_FROM = DS khách mới; còn lại = DS trừ khóa học.
         revenue: row.remuneration.revenue,
         totalRevenue: row.revenue - row.breakdown.course.revenue,
         policy: row.remuneration.policy,
         tier: row.remuneration.tier,
+        split: row.remuneration.split,
         commission: row.remuneration.commission,
         bonus: row.remuneration.performanceBonus,
         bankAccountNumber: info?.bankAccountNumber ?? "",

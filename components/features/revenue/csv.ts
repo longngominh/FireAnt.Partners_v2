@@ -1,4 +1,4 @@
-import { CONTRACT_TIER_LABELS } from "@/lib/commission";
+import { CONTRACT_TIER_LABELS, REPEAT_RATE } from "@/lib/commission";
 import type { MonthlyPartnerRevenue, MonthlyRevenueTotals } from "@/lib/data/revenue";
 import { formatMonthRangeLabel, type MonthKey } from "@/lib/utils/month";
 
@@ -62,7 +62,11 @@ export function buildMonthlyRevenueCsv(
         row.username,
         row.partnerTypeLabel,
         row.isActive ? "Đang hoạt động" : "Tạm dừng",
-        row.remuneration.policy === "tier" ? "Theo phụ lục" : "Bậc lũy tiến",
+        row.remuneration.policy === "split"
+          ? `Khách mới theo biểu + gia hạn, nâng cấp ${Math.round(REPEAT_RATE * 100)}%`
+          : row.remuneration.policy === "tier"
+            ? "Theo phụ lục"
+            : "Bậc lũy tiến",
         row.partnerType === "collaborator" ? CONTRACT_TIER_LABELS[row.tier] : "",
         row.directRevenue,
         row.staffRevenue,

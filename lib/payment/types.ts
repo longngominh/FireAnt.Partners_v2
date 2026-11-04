@@ -51,10 +51,15 @@ export type CustomerLookup =
       hasPhone: boolean;
       maskedPhone: string | null;
       /**
-       * Đã từng có đơn gói hội viên đã thanh toán (mọi kênh) → đơn mua gói này không phải
-       * "khách mua lần đầu", không tính vào doanh số xếp hạng CTV. null = chưa tra.
+       * Đơn mua gói này là gia hạn, không phải "khách mua lần đầu" (không tính theo biểu của hạng):
+       * trước SPLIT_POLICY_FROM = đã từng có đơn gói hội viên đã thanh toán (mọi kênh); từ SPLIT_POLICY_FROM = còn gói
+       * trả phí hoặc mới hết hạn chưa đủ NEW_CUSTOMER_LAPSE_MONTHS tháng. null = chưa tra.
        */
       isReturningMember: boolean | null;
+      /** Khách quay lại (từ SPLIT_POLICY_FROM): gói trả phí gần nhất hết hạn ngày này (dd/MM/yyyy), tính như khách mới. */
+      lapsedSince?: string | null;
+      /** Đang xét khách mới theo cách từ SPLIT_POLICY_FROM — để chọn câu báo phù hợp. */
+      lapseRule?: boolean;
     }
   | { status: "new-email"; input: string; email: string }
   | { status: "invalid"; input: string; error: string };

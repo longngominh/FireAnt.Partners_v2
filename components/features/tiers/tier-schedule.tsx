@@ -74,19 +74,31 @@ function normalRows(revenue: number | null): Row[] {
 
 /**
  * Biểu của phụ lục (hoặc bậc lũy tiến của chính sách Thường), tô đậm dòng ứng với doanh số
- * tháng này. Phụ lục tính trên doanh thu khách mới; Thường tính trên doanh số gói hội viên.
+ * tháng này. Phụ lục tính trên doanh thu khách mới; Thường trước SPLIT_POLICY_FROM tính trên doanh số gói
+ * hội viên. Có `repeatRate` (từ SPLIT_POLICY_FROM): các dòng là phần khách mới, thêm dòng gia hạn, nâng cấp.
  */
 export function TierSchedule({
   tier,
   revenue = null,
+  repeatRate = null,
   className,
 }: {
   tier: ContractTier;
-  /** Doanh số căn cứ của tháng đang xem — để tô dòng "Tháng này". */
+  /** Doanh số căn cứ của tháng đang xem (từ SPLIT_POLICY_FROM: doanh số khách mới) — để tô dòng "Tháng này". */
   revenue?: number | null;
+  /** Tỷ lệ gia hạn, nâng cấp khi tháng tính theo loại đơn. */
+  repeatRate?: number | null;
   className?: string;
 }) {
   const rows = tier === "normal" ? normalRows(revenue) : contractRows(tier, revenue);
+  if (repeatRate !== null) {
+    rows.push({
+      key: "repeat",
+      range: "Gia hạn, nâng cấp",
+      text: `${pct(repeatRate)} doanh số, mọi mức — không tính vào mốc`,
+      active: false,
+    });
+  }
   return (
     <div role="table" aria-label="Biểu thù lao" className={cn("flex flex-col overflow-hidden rounded-xl border text-[13px]", className)}>
       {rows.map((row) => (

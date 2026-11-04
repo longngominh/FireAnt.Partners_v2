@@ -4,7 +4,10 @@ import {
   FIXED_SALARY,
   FLAT_RATE,
   FLAT_RATE_THRESHOLD,
+  REPEAT_RATE,
   TIER_LABELS,
+  type PartnerTier,
+  type PartnerType,
   type RemunerationBreakdown,
 } from "@/lib/commission";
 
@@ -25,42 +28,74 @@ function pct(rate: number): string {
   return `${(rate * 100).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
 }
 
-export function explainRemuneration(r: RemunerationBreakdown): ExplainLine[] {
-  if (r.policy === "tier" && r.tier) {
-    const payout = calcTierPayout(r.tier, r.revenue);
-    return payout.lines.map((line) => {
-      if (line.kind === "base") return { label: `${n(line.base)} × ${pct(line.rate)}`, amount: line.amount };
-      if (line.kind === "bonus") {
-        return {
-          label: `Thưởng hạng ${TIER_LABELS[payout.tier]}: ${n(line.base)} × ${pct(line.rate)}`,
-          amount: line.amount,
-        };
-      }
+/** Các dòng của biểu phụ lục trên `revenue` (Σ = calcTierPayout(...).total). */
+function tierLines(tier: PartnerTier, revenue: number, prefix = ""): ExplainLine[] {
+  const payout = calcTierPayout(tier, revenue);
+  return payout.lines.map((line) => {
+    if (line.kind === "base") return { label: `${prefix}${n(line.base)} × ${pct(line.rate)}`, amount: line.amount };
+    if (line.kind === "bonus") {
       return {
-        label: line.from > 0 ? `Phần vượt ${n(line.from)}: ${n(line.base)} × ${pct(line.rate)}` : `${n(line.base)} × ${pct(line.rate)}`,
+        label: `${prefix}Thưởng hạng ${TIER_LABELS[payout.tier]}: ${n(line.base)} × ${pct(line.rate)}`,
         amount: line.amount,
       };
-    });
-  }
+    }
+    return {
+      label:
+        line.from > 0
+          ? `${prefix}Phần vượt ${n(line.from)}: ${n(line.base)} × ${pct(line.rate)}`
+          : `${prefix}${n(line.base)} × ${pct(line.rate)}`,
+      amount: line.amount,
+    };
+  });
+}
 
-  if (r.revenue >= FLAT_RATE_THRESHOLD) {
+/** Các dòng bậc lũy tiến trên `revenue`; bậc cuối nhận phần dư để Σ = `commission`. */
+function bandLines(revenue: number, partnerType: PartnerType, commission: number, prefix = ""): ExplainLine[] {
+  if (revenue >= FLAT_RATE_THRESHOLD) {
     const lines: ExplainLine[] = [
-      { label: `Từ ${n(FLAT_RATE_THRESHOLD)} trở lên: ${n(r.revenue)} × ${pct(FLAT_RATE)}`, amount: Math.floor(r.revenue * FLAT_RATE) },
+      {
+        label: `${prefix}Từ ${n(FLAT_RATE_THRESHOLD)} trở lên: ${n(revenue)} × ${pct(FLAT_RATE)}`,
+        amount: Math.floor(revenue * FLAT_RATE),
+      },
     ];
-    if (FIXED_SALARY[r.partnerType] > 0) {
-      lines.push({ label: "Trừ lương cứng (trả qua bảng lương)", amount: -FIXED_SALARY[r.partnerType] });
+    if (FIXED_SALARY[partnerType] > 0) {
+      lines.push({ label: "Trừ lương cứng (trả qua bảng lương)", amount: -FIXED_SALARY[partnerType] });
     }
     return lines;
   }
 
-  const parts = explainCommission(r.revenue, r.partnerType).filter((p) => p.rate > 0);
+  const parts = explainCommission(revenue, partnerType).filter((p) => p.rate > 0);
   let allocated = 0;
   return parts.map((part, index) => {
     const isLast = index === parts.length - 1;
-    const amount = isLast ? r.commission - allocated : Math.floor(part.commission);
+    const amount = isLast ? commission - allocated : Math.floor(part.commission);
     allocated += amount;
-    return { label: `Bậc ${n(part.from)}–${Number.isFinite(part.to) ? n(part.to) : "…"}: ${n(part.amount)} × ${pct(part.rate)}`, amount };
+    return {
+      label: `${prefix}Bậc ${n(part.from)}–${Number.isFinite(part.to) ? n(part.to) : "…"}: ${n(part.amount)} × ${pct(part.rate)}`,
+      amount,
+    };
   });
+}
+
+export function explainRemuneration(r: RemunerationBreakdown): ExplainLine[] {
+  if (r.policy === "split" && r.split) {
+    const { newRevenue, newCommission, repeatRevenue, repeatCommission } = r.split;
+    const lines: ExplainLine[] =
+      newRevenue <= 0
+        ? []
+        : r.tier
+          ? tierLines(r.tier, newRevenue, "Khách mới · ")
+          : bandLines(newRevenue, r.partnerType, newCommission, "Khách mới · ");
+    if (repeatRevenue > 0) {
+      lines.push({
+        label: `Gia hạn, nâng cấp · ${n(repeatRevenue)} × ${pct(REPEAT_RATE)}`,
+        amount: repeatCommission,
+      });
+    }
+    return lines;
+  }
+  if (r.policy === "tier" && r.tier) return tierLines(r.tier, r.revenue);
+  return bandLines(r.revenue, r.partnerType, r.commission);
 }
 
 /** Số tiền trả qua giấy đề nghị thanh toán (không gồm lương cứng NVKD). */

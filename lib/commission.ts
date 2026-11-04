@@ -1,7 +1,9 @@
 /**
  * Commission/remuneration engine.
  *
- * Hai chế độ:
+ * Đối tác (collaborator) từ SPLIT_POLICY_FROM: mọi hạng tính chung một cách theo loại đơn —
+ * khách mua gói hội viên lần đầu theo biểu của hạng, gia hạn/nâng cấp REPEAT_RATE (xem
+ * calcSplitRemuneration). Các tháng trước và NVKD giữ hai chế độ cũ:
  *   1. Phụ lục hợp đồng (chỉ collaborator đã ký phụ lục) — xem phần "Phụ lục hợp đồng"
  *      cuối file: biểu Bạc/Vàng/Kim cương trên doanh số KHÁCH MUA GÓI HỘI VIÊN LẦN ĐẦU.
  *   2. Bậc lũy tiến (NVKD luôn dùng; CTV chưa ký phụ lục = chính sách Thường)
@@ -15,6 +17,8 @@
  *   - Cả hai loại: doanh số từ 250tr trở lên thì tổng thu nhập tháng = 18% doanh số
  *     (NVKD: hoa hồng thực nhận = 18% doanh số − lương cứng 6tr).
  */
+
+import { formatDay } from "@/lib/utils/month";
 
 export const PARTNER_TYPES = ["sales_employee", "collaborator"] as const;
 export type PartnerType = (typeof PARTNER_TYPES)[number];
@@ -41,12 +45,28 @@ export type CommissionBand = {
   rate: number;
 };
 
-/** "tier": biểu phụ lục trên DS khách mới; "legacy": bậc lũy tiến trên toàn bộ DS. */
-export type RemunerationPolicy = "tier" | "legacy";
+/**
+ * "tier": biểu phụ lục trên DS khách mới; "legacy": bậc lũy tiến trên toàn bộ DS;
+ * "split": đối tác từ SPLIT_POLICY_FROM — khách mới theo biểu của hạng + gia hạn/nâng cấp phẳng.
+ */
+export type RemunerationPolicy = "tier" | "legacy" | "split";
+
+/** Hai phần của thù lao theo cách tính thống nhất (policy "split"). */
+export type SplitRemuneration = {
+  /** (a) Doanh số khách mua gói hội viên lần đầu — tính theo biểu của hạng. */
+  newRevenue: number;
+  newCommission: number;
+  /** (b) gia hạn, (c) nâng cấp và gói khác — tính REPEAT_RATE, không cộng vào mốc. */
+  repeatRevenue: number;
+  repeatCommission: number;
+};
 
 export type RemunerationBreakdown = {
   partnerType: PartnerType;
-  /** Doanh số làm căn cứ tính: DS khách mới (policy "tier") hoặc toàn bộ DS ("legacy"). */
+  /**
+   * Doanh số làm căn cứ tính: DS khách mới ("tier"), toàn bộ DS trừ khóa học ("legacy"),
+   * hoặc khách mới + gia hạn/nâng cấp ("split").
+   */
   revenue: number;
   baseSalary: number;
   commission: number;
@@ -54,8 +74,10 @@ export type RemunerationBreakdown = {
   total: number;
   effectiveRate: number;
   policy: RemunerationPolicy;
-  /** Phụ lục áp dụng trong tháng — chỉ có khi policy = "tier". */
+  /** Phụ lục áp dụng trong tháng — có khi policy = "tier", hoặc "split" với hạng Bạc/Vàng/Kim cương. */
   tier: PartnerTier | null;
+  /** Chỉ có khi policy = "split". */
+  split?: SplitRemuneration;
 };
 
 // Bảng NVKD đã gộp thưởng bán tốt vào tỷ lệ: từ bậc 90tr mỗi bậc cộng thêm
@@ -306,8 +328,9 @@ export function currentMonthRange(): { start: Date; end: Date } {
 // số. Chưa ký phụ lục = chính sách Thường = bậc lũy tiến CTV ở trên (toàn bộ doanh số).
 //
 // Có phụ lục: căn cứ tính là doanh số KHÁCH MUA GÓI HỘI VIÊN LẦN ĐẦU trong tháng (điểm a
-// của phụ lục), gồm cả doanh số của nhân viên trong thời gian được ghi nhận. Gia hạn,
-// nâng cấp, khóa học chưa có biểu (điểm b, c) nên chưa tính thù lao.
+// của phụ lục), gồm cả doanh số của nhân viên trong thời gian được ghi nhận. Trước
+// SPLIT_POLICY_FROM gia hạn, nâng cấp chưa có biểu (điểm b, c) nên chưa tính thù lao; từ
+// tháng đó mọi hạng tính gia hạn, nâng cấp REPEAT_RATE. Khóa học không thuộc phụ lục.
 //
 // Mỗi phụ lục có biểu đầy đủ cho mọi mức doanh số, đúng nguyên văn văn bản: Vàng và Kim
 // cương không có "thưởng hạng" dưới mốc của mình, nên ở một số mức doanh số hạng cao trả
@@ -459,16 +482,80 @@ export function marginalTierRate(tier: PartnerTier, newCustomerRevenue: number):
 }
 
 /**
- * Thù lao tháng của một đối tác theo phụ lục áp dụng cho tháng đó.
- *   - CTV có phụ lục Bạc/Vàng/Kim cương: biểu của phụ lục trên DS khách mới.
- *   - Còn lại (NVKD, hoặc CTV chính sách Thường): bậc lũy tiến trên toàn bộ DS.
+ * Phụ lục sửa đổi: từ tháng này mọi hạng của đối tác, kể cả Thường, tính chung một cách theo
+ * loại đơn. Các tháng trước giữ cách cũ. NVKD không đổi.
+ */
+export const SPLIT_POLICY_FROM = "2026-11";
+/** "11/2026" — cho chữ giải thích ("từ …", "trước …"). */
+export const SPLIT_POLICY_LABEL = `${SPLIT_POLICY_FROM.slice(5)}/${SPLIT_POLICY_FROM.slice(0, 4)}`;
+/** (b) gia hạn, (c) nâng cấp và gói khác — như nhau ở mọi hạng. */
+export const REPEAT_RATE = 0.1;
+/**
+ * Từ SPLIT_POLICY_FROM, khách mua lần đầu gồm cả khách quay lại: gói hội viên trả phí gần nhất đã
+ * hết hạn đủ chừng này tháng tính tới ngày thanh toán đơn mới, so theo ngày (xem classifiedCte).
+ */
+export const NEW_CUSTOMER_LAPSE_MONTHS = 3;
+
+/** Ví dụ cho chữ giải thích: mốc so theo ngày hết hạn và ngày mua lại, không theo giờ. */
+export const NEW_CUSTOMER_LAPSE_EXAMPLE = `gói hết hạn ngày ${formatDay(new Date(2026, 1, 21))} thì mua lại từ ngày ${formatDay(
+  new Date(2026, 1 + NEW_CUSTOMER_LAPSE_MONTHS, 21),
+)} là khách mới`;
+
+/** `month` dạng YYYY-MM. */
+export function usesSplitPolicy(month: string): boolean {
+  return month >= SPLIT_POLICY_FROM;
+}
+
+/**
+ * Thù lao đối tác theo cách tính thống nhất cho mọi hạng:
+ *   (a) khách mua gói hội viên lần đầu (kể cả khách quay lại sau NEW_CUSTOMER_LAPSE_MONTHS tháng)
+ *       theo biểu của hạng — Thường: bậc lũy tiến CTV; Bạc/Vàng/Kim cương: biểu phụ lục. Mốc chỉ
+ *       xét doanh số khách mới;
+ *   (b) gia hạn, (c) nâng cấp và gói khác: REPEAT_RATE, không cộng vào mốc.
+ * `revenue.total` là doanh số gói hội viên (đã trừ khóa học), `newCustomer` là phần khách mới.
+ */
+export function calcSplitRemuneration(
+  tier: ContractTier,
+  revenue: { total: number; newCustomer: number },
+): RemunerationBreakdown {
+  const newRevenue = Math.max(0, revenue.newCustomer);
+  const repeatRevenue = Math.max(0, revenue.total - newRevenue);
+  const newCommission = isPartnerTier(tier)
+    ? calcTierPayout(tier, newRevenue).total
+    : calcMonthlyRemuneration(newRevenue, "collaborator").total;
+  const repeatCommission = Math.floor(repeatRevenue * REPEAT_RATE + 1e-6);
+  const base = newRevenue + repeatRevenue;
+  const total = newCommission + repeatCommission;
+  return {
+    partnerType: "collaborator",
+    revenue: base,
+    baseSalary: 0,
+    commission: total,
+    performanceBonus: 0,
+    total,
+    effectiveRate: base > 0 ? total / base : 0,
+    policy: "split",
+    tier: isPartnerTier(tier) ? tier : null,
+    split: { newRevenue, newCommission, repeatRevenue, repeatCommission },
+  };
+}
+
+/**
+ * Thù lao tháng `month` (YYYY-MM) của một đối tác theo phụ lục áp dụng cho tháng đó.
+ *   - CTV từ SPLIT_POLICY_FROM: calcSplitRemuneration (mọi hạng).
+ *   - CTV có phụ lục Bạc/Vàng/Kim cương trước đó: biểu của phụ lục trên DS khách mới.
+ *   - Còn lại (NVKD, hoặc CTV chính sách Thường trước đó): bậc lũy tiến trên toàn bộ DS.
  */
 export function calcPartnerRemuneration(
   partnerType: PartnerType,
   tier: ContractTier,
   revenue: { total: number; newCustomer: number },
+  month: string,
 ): RemunerationBreakdown {
   const normalizedType = normalizePartnerType(partnerType);
+  if (normalizedType === "collaborator" && usesSplitPolicy(month)) {
+    return calcSplitRemuneration(tier, revenue);
+  }
   if (normalizedType === "collaborator" && isPartnerTier(tier)) {
     const payout = calcTierPayout(tier, revenue.newCustomer);
     return {

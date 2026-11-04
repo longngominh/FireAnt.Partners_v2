@@ -76,7 +76,7 @@ export async function getPartnerMonths(params: {
       direct,
       staff,
       total,
-      remuneration: calcPartnerRemuneration(partnerType, tier, remunerationBase(total)),
+      remuneration: calcPartnerRemuneration(partnerType, tier, remunerationBase(total), month),
     };
   });
 

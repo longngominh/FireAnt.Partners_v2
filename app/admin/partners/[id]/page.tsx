@@ -19,6 +19,8 @@ import {
   CONTRACT_TIER_LABELS,
   CONTRACT_TIERS,
   contractTierScheme,
+  REPEAT_RATE,
+  usesSplitPolicy,
   type ContractTier,
 } from "@/lib/commission";
 import { explainRemuneration, payableAmount } from "@/lib/earnings/explain";
@@ -58,7 +60,10 @@ function initialsOf(name: string): string {
     .join("");
 }
 
-/** Doanh thu tính thù lao của một tháng: DS khách mới (phụ lục) hoặc DS trừ khóa học (Thường, NVKD). */
+/**
+ * Doanh thu tính thù lao của một tháng: DS khách mới (phụ lục trước SPLIT_POLICY_FROM) hoặc DS trừ khóa học
+ * (Thường, NVKD, và mọi hạng từ SPLIT_POLICY_FROM — khách mới + gia hạn/nâng cấp).
+ */
 function baseOf(m: PartnerMonth): { direct: number; staff: number } {
   const tierPolicy = m.remuneration.policy === "tier";
   const pick = (b: RevenueBreakdown) => (tierPolicy ? b.new.revenue : remunerationBase(b).total);
@@ -122,7 +127,7 @@ export default async function PartnerDetailPage({
 
   const fees = Object.fromEntries(
     CONTRACT_TIERS.map((tier) => {
-      const rem = calcPartnerRemuneration("collaborator", tier, remunerationBase(current.total));
+      const rem = calcPartnerRemuneration("collaborator", tier, remunerationBase(current.total), now);
       return [tier, formatVND(payableAmount(rem))];
     }),
   ) as Record<ContractTier, string>;
@@ -252,9 +257,11 @@ export default async function PartnerDetailPage({
           label={`DS tính thù lao T${monthNumber}`}
           value={formatVND(r.revenue)}
           hint={
-            r.policy === "tier"
-              ? `${formatNumber(current.total.new.customers)} khách mua hội viên lần đầu`
-              : "Doanh số gói hội viên qua link, không gồm khóa học"
+            r.split
+              ? `Khách mới ${formatVND(r.split.newRevenue)} · gia hạn, nâng cấp ${formatVND(r.split.repeatRevenue)}`
+              : r.policy === "tier"
+                ? `${formatNumber(current.total.new.customers)} khách mua hội viên lần đầu`
+                : "Doanh số gói hội viên qua link, không gồm khóa học"
           }
         />
         <StatCard
@@ -312,6 +319,7 @@ export default async function PartnerDetailPage({
                   monthLabel={`tháng ${monthNumber}`}
                   monthStart={formatMonthStart(now)}
                   fees={fees}
+                  repeatRate={usesSplitPolicy(now) ? REPEAT_RATE : null}
                 />
               </div>
             </Panel>
@@ -344,11 +352,18 @@ export default async function PartnerDetailPage({
             <div className="flex flex-wrap items-center gap-2 text-sm">
               {isPartner ? <TierBadge tier={selected.tier} size="md" /> : null}
               <span className="text-muted-foreground">
-                {selected.remuneration.policy === "tier"
-                  ? `Căn cứ: doanh thu khách mua hội viên lần đầu ${formatVND(selected.total.new.revenue)} (trực tiếp ${formatVND(
-                      selected.direct.new.revenue,
-                    )} + nhân viên ${formatVND(selected.staff.new.revenue)})`
-                  : `Căn cứ: doanh số gói hội viên ${formatVND(selected.remuneration.revenue)} (không gồm khóa học)`}
+                {selected.remuneration.split
+                  ? `Căn cứ: khách mua hội viên lần đầu ${formatVND(selected.remuneration.split.newRevenue)} theo biểu ${
+                      contractTierScheme(selected.tier)
+                    }; gia hạn, nâng cấp ${formatVND(selected.remuneration.split.repeatRevenue)} × ${formatPercent(
+                      REPEAT_RATE,
+                      0,
+                    )} (không gồm khóa học)`
+                  : selected.remuneration.policy === "tier"
+                    ? `Căn cứ: doanh thu khách mua hội viên lần đầu ${formatVND(selected.total.new.revenue)} (trực tiếp ${formatVND(
+                        selected.direct.new.revenue,
+                      )} + nhân viên ${formatVND(selected.staff.new.revenue)})`
+                    : `Căn cứ: doanh số gói hội viên ${formatVND(selected.remuneration.revenue)} (không gồm khóa học)`}
               </span>
             </div>
             {lines.length > 0 ? (
@@ -375,7 +390,7 @@ export default async function PartnerDetailPage({
             )}
             {selected.remuneration.policy === "tier" && otherRevenue(selected.total) > 0 ? (
               <p className="text-[13px] leading-5 text-muted-foreground">
-                Gia hạn, nâng cấp và khóa học ({formatShortVND(otherRevenue(selected.total))}) vẫn ghi nhận doanh thu nhưng chưa
+                Gia hạn, nâng cấp và khóa học ({formatVND(otherRevenue(selected.total))}) vẫn ghi nhận doanh thu nhưng chưa
                 tính theo phụ lục.
               </p>
             ) : null}

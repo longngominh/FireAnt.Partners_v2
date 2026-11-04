@@ -2,7 +2,10 @@ import Link from "next/link";
 import { ChevronDownIcon, PhoneIcon } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { requirePortalSession } from "@/lib/auth/session";
+import { NEW_CUSTOMER_LAPSE_EXAMPLE, NEW_CUSTOMER_LAPSE_MONTHS, REPEAT_RATE, usesSplitPolicy } from "@/lib/commission";
 import { getPortalAffiliation } from "@/lib/data/portal";
+import { formatPercent } from "@/lib/utils/currency";
+import { currentMonthKey } from "@/lib/utils/month";
 
 export const metadata = { title: "Hướng dẫn bán hàng" };
 
@@ -50,7 +53,9 @@ export default async function GuidePage() {
       }
     : {
         q: "Đơn nào được tính phí/thù lao?",
-        a: "Với phụ lục Bạc, Vàng, Kim cương: đơn của khách mua gói hội viên lần đầu, gồm cả đơn của nhân viên trong thời gian được ghi nhận. Gia hạn và nâng cấp vẫn hiện trong doanh thu nhưng chưa tính phí/thù lao. Chính sách Thường tính trên toàn bộ doanh số gói hội viên. Khóa học FireAnt Academy được thanh toán riêng, không tính ở đây.",
+        a: usesSplitPolicy(currentMonthKey())
+          ? `Mọi đơn gói hội viên qua link của bạn và nhân viên (trong thời gian được ghi nhận). Đơn của khách mua gói hội viên lần đầu tính theo biểu của hạng: chính sách Thường theo bậc lũy tiến, phụ lục Bạc, Vàng, Kim cương theo biểu phụ lục; mốc doanh số chỉ xét khách mới. Khách mua lần đầu là tài khoản chưa có gói hội viên trả phí nào (gói dùng thử không tính), hoặc gói trả phí gần nhất đã hết hạn đủ ${NEW_CUSTOMER_LAPSE_MONTHS} tháng (vd ${NEW_CUSTOMER_LAPSE_EXAMPLE}) — trang tạo link báo ngay khi bạn nhập tài khoản khách. Gia hạn và nâng cấp tính ${formatPercent(REPEAT_RATE, 0)} ở mọi hạng. Khóa học FireAnt Academy được thanh toán riêng, không tính ở đây.`
+          : "Với phụ lục Bạc, Vàng, Kim cương: đơn của khách mua gói hội viên lần đầu, gồm cả đơn của nhân viên trong thời gian được ghi nhận. Gia hạn và nâng cấp vẫn hiện trong doanh thu nhưng chưa tính phí/thù lao. Chính sách Thường tính trên toàn bộ doanh số gói hội viên. Khóa học FireAnt Academy được thanh toán riêng, không tính ở đây.",
       };
 
   return (

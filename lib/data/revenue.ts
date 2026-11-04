@@ -40,14 +40,14 @@ export type MonthlyPartnerRevenue = {
   partnerTypeLabel: string;
   /** Toàn bộ doanh số qua link trong tháng (mọi loại đơn). */
   revenue: number;
-  /** Doanh số khách mua gói hội viên lần đầu — căn cứ tính thù lao theo phụ lục. */
+  /** Doanh số khách mua gói hội viên lần đầu — phần tính theo biểu của hạng. */
   newCustomerRevenue: number;
   /** Doanh số qua link của chính đối tác / của nhân viên trong thời gian được ghi nhận. */
   directRevenue: number;
   staffRevenue: number;
   /** Phụ lục áp dụng cho tháng. */
   tier: ContractTier;
-  /** Gia hạn + nâng cấp + khóa học + khác — chưa tính thù lao theo hạng. */
+  /** Gia hạn + nâng cấp + khóa học + khác — không tính theo biểu của hạng (xem calcPartnerRemuneration). */
   otherRevenue: number;
   breakdown: RevenueBreakdown;
   orderCount: number;
@@ -131,6 +131,7 @@ export function buildMonthlyRow(
   profile: PartnerProfile,
   split: SplitBreakdown,
   tier: ContractTier,
+  month: MonthKey,
 ): MonthlyPartnerRevenue {
   const breakdown = mergeBreakdowns(split.direct, split.staff);
   return {
@@ -146,7 +147,7 @@ export function buildMonthlyRow(
     orderCount: breakdown.total.orders,
     customerCount: breakdown.total.customers,
     lastOrderAt: breakdown.lastOrderAt,
-    remuneration: calcPartnerRemuneration(profile.partnerType, tier, remunerationBase(breakdown)),
+    remuneration: calcPartnerRemuneration(profile.partnerType, tier, remunerationBase(breakdown), month),
   };
 }
 
@@ -271,6 +272,7 @@ export async function getMonthlyRevenueReport({
           profile,
           splits.get(profile.partnerId) ?? empty,
           contracts.get(profile.partnerId)?.tier ?? "normal",
+          normalizedMonth,
         ),
       )
       .sort((a, b) => b.revenue - a.revenue || a.partnerId - b.partnerId);
@@ -317,6 +319,7 @@ export async function getMonthlyRevenueRows(months: MonthKey[]): Promise<Map<Mon
             profile,
             splits.get(`${profile.partnerId}|${month}`) ?? empty,
             tierInMonth(tiers, profile.partnerId, month),
+            month,
           ),
         ),
       );
@@ -455,7 +458,7 @@ export async function getMonthlyHistory(params: {
           month,
           breakdown,
           tier,
-          remuneration: calcPartnerRemuneration(type, tier, remunerationBase(breakdown)),
+          remuneration: calcPartnerRemuneration(type, tier, remunerationBase(breakdown), month),
         };
       }),
     );

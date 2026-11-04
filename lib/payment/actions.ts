@@ -18,7 +18,7 @@ import { qrToDataUrl } from "@/lib/utils/qr";
 import { getPartner } from "@/lib/data/partners";
 import { getStaffAffiliation } from "@/lib/data/staff";
 import { findFireAntUser, setFireAntUserPhoneIfEmpty } from "@/lib/data/identity";
-import { hasPaidMembership } from "@/lib/data/revenue-breakdown";
+import { getMembershipStatus } from "@/lib/data/revenue-breakdown";
 import {
   countAccountsCreatedBy,
   logCustomerAccountAction,
@@ -28,6 +28,7 @@ import { CustomerUserNameError, isEmailLike, resolveCustomerUserName } from "@/l
 import { registerFireAntAccount, sendPasswordSetupEmail } from "@/lib/payment/fireant-account";
 import { PHONE_REQUIRED_MESSAGE, maskPhone } from "@/lib/payment/phone";
 import { getUpgradeQuote, type UpgradeQuote } from "@/lib/data/membership";
+import { formatDay } from "@/lib/utils/month";
 import {
   VOUCHER_FULL_DISCOUNT_MESSAGE,
   VoucherApplyError,
@@ -500,13 +501,16 @@ export async function lookupCustomerAction(rawInput: string): Promise<CustomerLo
   try {
     const user = await findFireAntUser(input);
     if (user) {
+      const membership = await getMembershipStatus(user.userName);
       return {
         status: "account",
         input,
         userName: user.userName,
         hasPhone: !!user.phoneNumber,
         maskedPhone: maskPhone(user.phoneNumber),
-        isReturningMember: await hasPaidMembership(user.userName),
+        isReturningMember: membership.returning,
+        lapsedSince: membership.lapsedSince ? formatDay(membership.lapsedSince) : null,
+        lapseRule: membership.lapseRule,
       };
     }
     if (isEmailLike(input)) return { status: "new-email", input, email: input.toLowerCase() };

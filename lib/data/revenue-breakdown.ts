@@ -1,14 +1,19 @@
+import { addMonths, startOfDay } from "date-fns";
+import { NEW_CUSTOMER_LAPSE_MONTHS, SPLIT_POLICY_FROM, usesSplitPolicy } from "@/lib/commission";
 import { getPool, sql } from "@/lib/db/sql";
 import { hasStaffModel } from "@/lib/data/staff-model";
 import { monthRange, toMonthKey, type MonthKey } from "@/lib/utils/month";
 
 /**
  * Phân loại doanh số qua link CTV theo loại đơn — căn cứ của chính sách xếp hạng
- * (chỉ "new" = khách mua gói hội viên lần đầu được tính thù lao theo hạng).
+ * ("new" = khách mua gói hội viên lần đầu tính theo biểu của hạng; từ SPLIT_POLICY_FROM gia hạn,
+ * nâng cấp và gói khác tính tỷ lệ chung REPEAT_RATE — xem calcPartnerRemuneration).
  *
- *   new      — gói hội viên, tài khoản CHƯA từng có đơn hội viên đã thanh toán nào
- *              trước đơn này ở bất kỳ kênh nào (đơn hội viên đã thanh toán đầu tiên).
- *   renewal  — gói hội viên, khách đã từng mua hội viên trước đó.
+ *   new      — gói hội viên của khách mua lần đầu. Đơn trước SPLIT_POLICY_FROM: đơn hội viên
+ *              đã thanh toán đầu tiên của tài khoản ở bất kỳ kênh nào. Từ SPLIT_POLICY_FROM:
+ *              tài khoản chưa có gói hội viên trả phí nào (gói dùng thử, 0 đồng không tính),
+ *              hoặc gói trả phí gần nhất đã hết hạn đủ NEW_CUSTOMER_LAPSE_MONTHS tháng.
+ *   renewal  — gói hội viên, các trường hợp còn lại.
  *   upgrade  — đơn nâng cấp hội viên kiểu mới (chỉ tính phần chênh lệch đã trả).
  *   course   — khóa học (ServiceID 39).
  *   other    — gói khác (nếu có).
@@ -71,9 +76,10 @@ export function otherRevenue(b: RevenueBreakdown): number {
 }
 
 /**
- * Căn cứ tính phí/thù lao của một breakdown cho calcPartnerRemuneration: phụ lục tính trên DS khách
- * mới; chính sách Thường và NVKD tính trên toàn bộ DS trừ khóa học. Khóa học FireAnt Academy được
- * thanh toán riêng ở phần Quản lý khóa học (Admin), không tính ở trang Partner.
+ * Căn cứ tính phí/thù lao của một breakdown cho calcPartnerRemuneration: DS gói hội viên (trừ khóa
+ * học) và phần khách mới trong đó — calcPartnerRemuneration chọn phần dùng theo tháng và hạng.
+ * Khóa học FireAnt Academy được thanh toán riêng ở phần Quản lý khóa học (Admin), không tính ở
+ * trang Partner.
  */
 export function remunerationBase(b: RevenueBreakdown): { total: number; newCustomer: number } {
   return { total: b.total.revenue - b.course.revenue, newCustomer: b.new.revenue };
@@ -82,6 +88,10 @@ export function remunerationBase(b: RevenueBreakdown): { total: number; newCusto
 /**
  * @PartnerId lọc theo người hưởng (đối tác: gồm cả đơn của nhân viên trong thời gian ghi
  * nhận); @SellerId lọc theo người bán. withStaff = false khi CSDL chưa có migration.
+ *
+ * Trả về đầu một batch: đơn trong khoảng và lịch sử gói hội viên của các khách đó được ghi vào
+ * bảng tạm một lần (truy vấn vw_PaidOrders nặng, và xét khách quay lại cần lịch sử từng khách),
+ * rồi tới CTE `Classified` để câu SELECT phía sau dùng. Bảng tạm tự xóa khi batch kết thúc.
  */
 function classifiedCte(withStaff: boolean): string {
   const staffSellers = withStaff
@@ -99,6 +109,10 @@ function classifiedCte(withStaff: boolean): string {
     ) att`
     : "";
   return `
+  SET NOCOUNT ON;
+  DROP TABLE IF EXISTS #Orders;
+  DROP TABLE IF EXISTS #MemberOrders;
+
   WITH PaidByCoupon AS (
     SELECT cp.CouponID, cp.PartnerId, MAX(o.OrderID) AS OrderID
     FROM Coupons cp
@@ -108,35 +122,54 @@ function classifiedCte(withStaff: boolean): string {
       AND (@PartnerId IS NULL OR cp.PartnerId = @PartnerId ${staffSellers})
       AND (@SellerId IS NULL OR cp.PartnerId = @SellerId)
     GROUP BY cp.CouponID, cp.PartnerId
+  )
+  -- Số tiền, giá niêm yết, gói lấy từ vw_PaidOrders (giá theo lịch sử giá gói; đơn mua rồi
+  -- nâng cấp kiểu cũ vẫn tính giá mua ban đầu) để khớp usp_GetPartnerMonthlyRevenue.
+  -- Chỉ đơn nâng cấp kiểu mới (service_Orders.UpgradeAmount) là loại "nâng cấp"; đơn mua
+  -- được nâng cấp về sau vẫn là khách mới / gia hạn.
+  SELECT
+    ${attributed} AS PartnerId,
+    pbc.PartnerId AS SellerPartnerId,
+    v.OrderID, v.OrderDate, v.UserName, v.CouponCode, v.PackageID,
+    v.ServiceID, v.PackageName, v.ListAmount,
+    CASE WHEN o.UpgradeAmount IS NOT NULL THEN 1 ELSE 0 END AS IsUpgrade,
+    v.Amount
+  INTO #Orders
+  FROM PaidByCoupon pbc
+  INNER JOIN vw_PaidOrders v ON v.OrderID = pbc.OrderID
+  INNER JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.OrderID = pbc.OrderID
+  ${attribution}
+  WHERE v.OrderDate >= @Start
+    AND v.OrderDate <  @End;
+
+  -- Mọi đơn gói hội viên đã thanh toán (mọi kênh, không chỉ qua CTV) của các khách trên.
+  SELECT
+    m.UserName,
+    m.OrderID,
+    COALESCE(m.EndDate, m.OrderDate) AS EndAt,
+    CASE WHEN ISNULL(mp.IsTrial, 0) = 0 AND ISNULL(mp.Amount, 0) > 0 THEN 1 ELSE 0 END AS IsPaidPackage
+  INTO #MemberOrders
+  FROM [EStocks_Data].[dbo].[service_Orders] m
+  INNER JOIN [EStocks_Data].[dbo].[service_Packages] mp ON mp.PackageID = m.PackageID
+  WHERE m.IsPaid = 1
+    AND (mp.ServiceID IN (${MEMBERSHIP_SERVICE_IDS}) OR m.PackageID IN (${MEMBERSHIP_PACKAGE_IDS}))
+    AND m.UserName IN (SELECT UserName FROM #Orders);
+
+  WITH FirstMembership AS (
+    -- Đơn hội viên đã thanh toán đầu tiên của mỗi khách (quy tắc trước @NewFrom).
+    SELECT UserName, MIN(OrderID) AS FirstOrderID
+    FROM #MemberOrders
+    GROUP BY UserName
   ),
-  Orders AS (
-    -- Số tiền, giá niêm yết, gói lấy từ vw_PaidOrders (giá theo lịch sử giá gói; đơn mua rồi
-    -- nâng cấp kiểu cũ vẫn tính giá mua ban đầu) để khớp usp_GetPartnerMonthlyRevenue.
-    -- Chỉ đơn nâng cấp kiểu mới (service_Orders.UpgradeAmount) là loại "nâng cấp"; đơn mua
-    -- được nâng cấp về sau vẫn là khách mới / gia hạn.
-    SELECT
-      ${attributed} AS PartnerId,
-      pbc.PartnerId AS SellerPartnerId,
-      v.OrderID, v.OrderDate, v.UserName, v.CouponCode, v.PackageID,
-      v.ServiceID, v.PackageName, v.ListAmount,
-      CASE WHEN o.UpgradeAmount IS NOT NULL THEN 1 ELSE 0 END AS IsUpgrade,
-      v.Amount
-    FROM PaidByCoupon pbc
-    INNER JOIN vw_PaidOrders v ON v.OrderID = pbc.OrderID
-    INNER JOIN [EStocks_Data].[dbo].[service_Orders] o ON o.OrderID = pbc.OrderID
-    ${attribution}
-    WHERE v.OrderDate >= @Start
-      AND v.OrderDate <  @End
-  ),
-  FirstMembership AS (
-    -- Đơn hội viên đã thanh toán đầu tiên của mỗi khách, mọi kênh (không chỉ qua CTV).
-    SELECT m.UserName, MIN(m.OrderID) AS FirstOrderID
-    FROM [EStocks_Data].[dbo].[service_Orders] m
-    INNER JOIN [EStocks_Data].[dbo].[service_Packages] mp ON mp.PackageID = m.PackageID
-    WHERE m.IsPaid = 1
-      AND (mp.ServiceID IN (${MEMBERSHIP_SERVICE_IDS}) OR m.PackageID IN (${MEMBERSHIP_PACKAGE_IDS}))
-      AND m.UserName IN (SELECT UserName FROM Orders)
-    GROUP BY m.UserName
+  PrevPaid AS (
+    -- Hạn cuối của các gói hội viên trả phí trước đơn này (gói dùng thử, 0 đồng không tính);
+    -- chỉ cần cho đơn từ @NewFrom.
+    SELECT o.OrderID, MAX(h.EndAt) AS PaidEnd
+    FROM #Orders o
+    INNER JOIN #MemberOrders h
+      ON h.UserName = o.UserName AND h.IsPaidPackage = 1 AND h.OrderID < o.OrderID
+    WHERE o.OrderDate >= @NewFrom
+    GROUP BY o.OrderID
   ),
   Classified AS (
     SELECT
@@ -146,16 +179,29 @@ function classifiedCte(withStaff: boolean): string {
         WHEN o.ServiceID IN (${MEMBERSHIP_SERVICE_IDS}) OR o.PackageID IN (${MEMBERSHIP_PACKAGE_IDS}) THEN
           CASE
             WHEN o.IsUpgrade = 1 THEN 'upgrade'
+            -- Từ @NewFrom (phụ lục sửa đổi): chưa có gói trả phí nào, hoặc gói trả phí gần nhất đã
+            -- hết hạn đủ @LapseMonths tháng tính tới ngày của đơn này = khách mua lần đầu. So theo
+            -- ngày, không theo giờ: hết hạn ngày 21/02, mốc 3 tháng → đơn từ ngày 21/05 là khách mới.
+            WHEN o.OrderDate >= @NewFrom THEN
+              CASE
+                WHEN pp.PaidEnd IS NULL
+                  OR CAST(o.OrderDate AS date) >= DATEADD(month, @LapseMonths, CAST(pp.PaidEnd AS date)) THEN 'new'
+                ELSE 'renewal'
+              END
             WHEN fm.FirstOrderID = o.OrderID THEN 'new'
             ELSE 'renewal'
           END
         ELSE 'other'
       END AS Kind
-    FROM Orders o
+    FROM #Orders o
     LEFT JOIN FirstMembership fm ON fm.UserName = o.UserName
+    LEFT JOIN PrevPaid pp ON pp.OrderID = o.OrderID
   )
 `;
 }
+
+/** Ngày bắt đầu áp dụng cách xét khách mua lần đầu mới — tham số @NewFrom của classifiedCte. */
+const NEW_CUSTOMER_RULE_FROM = monthRange(SPLIT_POLICY_FROM).start;
 
 type AggregateRow = {
   PartnerId: number;
@@ -196,6 +242,8 @@ async function queryBreakdowns(params: {
     .input("End", sql.DateTime, end)
     .input("PartnerId", sql.Int, partnerId)
     .input("SellerId", sql.Int, sellerId)
+    .input("NewFrom", sql.DateTime, NEW_CUSTOMER_RULE_FROM)
+    .input("LapseMonths", sql.Int, NEW_CUSTOMER_LAPSE_MONTHS)
     .query<AggregateRow>(`
       ${classifiedCte(withStaff)}
       SELECT
@@ -386,8 +434,20 @@ export async function listClassifiedOrders(params: {
   partnerId?: number | null;
   sellerId?: number | null;
   top?: number | null;
+  /** Ngày bắt đầu xét khách mua lần đầu theo cách mới — mặc định ngày áp dụng; đổi để đối chiếu. */
+  newCustomerRuleFrom?: Date;
+  /** Số tháng hết hạn để tính là khách quay lại — mặc định NEW_CUSTOMER_LAPSE_MONTHS; đổi để đối chiếu. */
+  lapseMonths?: number;
 }): Promise<ClassifiedOrder[]> {
-  const { start, end, partnerId = null, sellerId = null, top = null } = params;
+  const {
+    start,
+    end,
+    partnerId = null,
+    sellerId = null,
+    top = null,
+    newCustomerRuleFrom = NEW_CUSTOMER_RULE_FROM,
+    lapseMonths = NEW_CUSTOMER_LAPSE_MONTHS,
+  } = params;
   try {
     const withStaff = await hasStaffModel();
     const pool = await getPool();
@@ -398,6 +458,8 @@ export async function listClassifiedOrders(params: {
       .input("PartnerId", sql.Int, partnerId)
       .input("SellerId", sql.Int, sellerId)
       .input("Top", sql.Int, top ?? 100000)
+      .input("NewFrom", sql.DateTime, newCustomerRuleFrom)
+      .input("LapseMonths", sql.Int, lapseMonths)
       .query<OrderRow>(`
         ${classifiedCte(withStaff)}
         SELECT TOP (@Top)
@@ -467,27 +529,47 @@ export async function getPendingNewCustomerPotential(
   }
 }
 
+export type MembershipStatus = {
+  /** Đơn gói hội viên mua lúc này sẽ là gia hạn (không phải khách mua lần đầu). */
+  returning: boolean;
+  /** Khách quay lại: gói trả phí gần nhất hết hạn ngày này, đã đủ NEW_CUSTOMER_LAPSE_MONTHS tháng → khách mới. */
+  lapsedSince: Date | null;
+  /** Đang xét theo cách mới (từ SPLIT_POLICY_FROM): bỏ gói dùng thử, khách hết hạn đủ số tháng là khách mới. */
+  lapseRule: boolean;
+};
+
 /**
- * Khách của một email đã từng mua gói hội viên chưa — để trang tạo link báo trước
- * đơn sẽ là "khách mới" (tính hạng) hay "gia hạn".
+ * Đơn gói hội viên của khách này, nếu thanh toán lúc `now`, là "khách mới" (tính theo biểu của
+ * hạng) hay "gia hạn" — để trang tạo link báo trước. Cùng quy tắc với classifiedCte.
  */
-export async function hasPaidMembership(userName: string): Promise<boolean> {
+export async function getMembershipStatus(userName: string, now: Date = new Date()): Promise<MembershipStatus> {
+  const lapseRule = usesSplitPolicy(toMonthKey(now));
   try {
     const pool = await getPool();
     const res = await pool
       .request()
       .input("UserName", sql.NVarChar(256), userName)
-      .query<{ Found: number }>(`
-        SELECT TOP 1 1 AS Found
+      .query<{ PaidOrders: number; PaidEnd: Date | null }>(`
+        SELECT
+          COUNT(*) AS PaidOrders,
+          MAX(CASE WHEN ISNULL(mp.IsTrial, 0) = 0 AND ISNULL(mp.Amount, 0) > 0
+                   THEN COALESCE(m.EndDate, m.OrderDate) END) AS PaidEnd
         FROM [EStocks_Data].[dbo].[service_Orders] m
         INNER JOIN [EStocks_Data].[dbo].[service_Packages] mp ON mp.PackageID = m.PackageID
         WHERE m.UserName = @UserName
           AND m.IsPaid = 1
           AND (mp.ServiceID IN (${MEMBERSHIP_SERVICE_IDS}) OR m.PackageID IN (${MEMBERSHIP_PACKAGE_IDS}));
       `);
-    return res.recordset.length > 0;
+    const row = res.recordset[0];
+    if (!lapseRule) return { returning: (row?.PaidOrders ?? 0) > 0, lapsedSince: null, lapseRule };
+    const paidEnd = row?.PaidEnd ?? null;
+    if (!paidEnd) return { returning: false, lapsedSince: null, lapseRule };
+    // So theo ngày như classifiedCte: hết hạn ngày D thì từ ngày D + số tháng là khách mới.
+    return startOfDay(now) >= addMonths(startOfDay(paidEnd), NEW_CUSTOMER_LAPSE_MONTHS)
+      ? { returning: false, lapsedSince: paidEnd, lapseRule }
+      : { returning: true, lapsedSince: null, lapseRule };
   } catch (err) {
-    console.error("[hasPaidMembership]", err);
-    return false;
+    console.error("[getMembershipStatus]", err);
+    return { returning: false, lapsedSince: null, lapseRule };
   }
 }

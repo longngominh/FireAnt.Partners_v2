@@ -10,17 +10,21 @@ import {
   FLAT_RATE,
   FLAT_RATE_THRESHOLD,
   hasPerformanceBonus,
+  NEW_CUSTOMER_LAPSE_MONTHS,
   PARTNER_TIERS,
   PARTNER_TYPE_LABELS,
   PERFORMANCE_BONUSES,
+  REPEAT_RATE,
   SALES_EMPLOYEE_COMMISSION_BANDS,
   TIER_APPENDIX,
   TIER_LABELS,
   TIER_SCHEDULES,
+  usesSplitPolicy,
   type CommissionBand,
   type PartnerTier,
   type PartnerType,
   type RemunerationPolicy,
+  type SplitRemuneration,
 } from "@/lib/commission";
 import { ORDER_KIND_LABELS, type OrderKind } from "@/lib/data/revenue-breakdown";
 import { monthRange, parseMonthKey, type MonthKey } from "@/lib/utils/month";
@@ -41,13 +45,18 @@ export type PaymentRequestRow = {
   fullName: string;
   username: string;
   partnerType: PartnerType;
-  /** Căn cứ tính thù lao: DS khách mới (policy "tier") hoặc DS trừ khóa học ("legacy"). */
+  /**
+   * Căn cứ tính thù lao: DS khách mới (policy "tier"), DS trừ khóa học ("legacy"), hoặc khách mới +
+   * gia hạn/nâng cấp ("split").
+   */
   revenue: number;
   /** Toàn bộ doanh số qua link trong tháng (mọi loại đơn) — đối chiếu bảng kê đơn. */
   totalRevenue: number;
   policy: RemunerationPolicy;
-  /** Phụ lục áp dụng trong tháng — chỉ có khi policy = "tier". */
+  /** Phụ lục áp dụng trong tháng — có khi policy = "tier", hoặc "split" với hạng Bạc/Vàng/Kim cương. */
   tier: PartnerTier | null;
+  /** Hai phần khách mới / gia hạn, nâng cấp — chỉ có khi policy = "split". */
+  split?: SplitRemuneration;
   commission: number;
   bonus: number;
   bankAccountNumber: string;
@@ -194,7 +203,8 @@ async function buildRequestSheet(
   const { year, month: monthNumber } = parseMonthKey(month);
   const { start, end } = monthRange(month);
   const lastDay = new Date(end.getTime() - 1);
-  const hasTierRows = rows.some((row) => row.policy === "tier");
+  const splitMonth = usesSplitPolicy(month);
+  const hasTierRows = rows.some((row) => row.policy !== "legacy");
 
   const sheet = workbook.addWorksheet(`T${monthNumber}-${year}`);
   COLUMN_WIDTHS.forEach((width, index) => {
@@ -245,7 +255,7 @@ async function buildRequestSheet(
   headerRow.values = [
     "Họ tên",
     "Tk FireAnt",
-    // Cột căn cứ tính: đối tác có phụ lục = DS khách mới; chính sách Thường và NVKD = DS trừ khóa học.
+    // Cột căn cứ tính: đối tác có phụ lục = DS khách mới (trước SPLIT_POLICY_FROM); còn lại = DS trừ khóa học.
     `${hasTierRows ? "Doanh số tính thù lao" : "Doanh số"} từ ${dmy(start)} đến ${dmy(lastDay)}`,
     "Hoa hồng",
     "Thưởng",
@@ -331,15 +341,22 @@ async function buildRequestSheet(
 
   const noteRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.sheetNote);
   sheet.mergeCells(noteRow.number, 1, noteRow.number, LAST_COLUMN);
-  noteRow.getCell(1).value = hasTierRows
-    ? "Đối tác có phụ lục Bạc · Vàng · Kim cương tính trên doanh số khách mua hội viên lần đầu, gồm doanh số " +
-      "nhân viên của đối tác; chính sách Thường và nhân viên kinh doanh theo bậc trên doanh số gói hội viên. Cách tính " +
-      `từng người xem sheet "${EXPLANATION_SHEET}"; chi tiết đơn hàng đã thanh toán xem sheet "${ORDERS_SHEET}".`
-    : `Cách tính hoa hồng theo bậc của từng người xem sheet "${EXPLANATION_SHEET}"; ` +
-      `chi tiết đơn hàng đã thanh toán xem sheet "${ORDERS_SHEET}".`;
-  styleCell(noteRow.getCell(1), { italic: true, size: 11, wrap: hasTierRows, align: "left" });
+  const seeSheets =
+    `Cách tính từng người xem sheet "${EXPLANATION_SHEET}"; chi tiết đơn hàng đã thanh toán xem sheet "${ORDERS_SHEET}".`;
+  noteRow.getCell(1).value = splitMonth
+    ? "Đối tác mọi hạng tính theo loại đơn, gồm doanh số nhân viên của đối tác: khách mua gói hội viên lần đầu theo " +
+      "biểu của hạng (Thường: bậc lũy tiến; Bạc · Vàng · Kim cương: biểu phụ lục); gia hạn, nâng cấp " +
+      `${percent(REPEAT_RATE)}. Nhân viên kinh doanh theo bậc trên doanh số gói hội viên. ${seeSheets}`
+    : hasTierRows
+      ? "Đối tác có phụ lục Bạc · Vàng · Kim cương tính trên doanh số khách mua hội viên lần đầu, gồm doanh số " +
+        "nhân viên của đối tác; chính sách Thường và nhân viên kinh doanh theo bậc trên doanh số gói hội viên. " +
+        seeSheets
+      : `Cách tính hoa hồng theo bậc của từng người xem sheet "${EXPLANATION_SHEET}"; ` +
+        `chi tiết đơn hàng đã thanh toán xem sheet "${ORDERS_SHEET}".`;
+  styleCell(noteRow.getCell(1), { italic: true, size: 11, wrap: hasTierRows || splitMonth, align: "left" });
   // Ô merge không tự giãn theo nội dung xuống dòng.
-  if (hasTierRows) noteRow.height = 30;
+  if (splitMonth) noteRow.height = 45;
+  else if (hasTierRows) noteRow.height = 30;
 
   const amountRow = sheet.getRow(totalRowNumber + OFFSET_AFTER_TOTAL.amountInWords);
   amountRow.getCell(1).value = "Đề nghị thanh toán số tiền";
@@ -393,6 +410,7 @@ const BANDS_BY_TYPE: Record<PartnerType, readonly CommissionBand[]> = {
 function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput): void {
   const { month, rows } = input;
   const { year, month: monthNumber } = parseMonthKey(month);
+  const splitMonth = usesSplitPolicy(month);
   const tierMonth = rows.some((row) => row.policy === "tier");
   const sheet = workbook.addWorksheet(EXPLANATION_SHEET);
   EXPLANATION_WIDTHS.forEach((width, index) => {
@@ -403,48 +421,68 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
   const mergeAcross = (r: number) => sheet.mergeCells(r, 1, r, EXPLANATION_LAST_COLUMN);
 
   mergeAcross(rowNumber);
-  sheet.getCell(rowNumber, 1).value = tierMonth
-    ? `CÁCH TÍNH PHÍ/THÙ LAO THEO PHỤ LỤC VÀ HOA HỒNG THEO BẬC — THÁNG ${monthNumber}/${year}`
-    : `CÁCH TÍNH HOA HỒNG THEO BẬC — THÁNG ${monthNumber}/${year}`;
+  sheet.getCell(rowNumber, 1).value = splitMonth
+    ? `CÁCH TÍNH PHÍ/THÙ LAO ĐỐI TÁC THEO LOẠI ĐƠN VÀ HOA HỒNG THEO BẬC — THÁNG ${monthNumber}/${year}`
+    : tierMonth
+      ? `CÁCH TÍNH PHÍ/THÙ LAO THEO PHỤ LỤC VÀ HOA HỒNG THEO BẬC — THÁNG ${monthNumber}/${year}`
+      : `CÁCH TÍNH HOA HỒNG THEO BẬC — THÁNG ${monthNumber}/${year}`;
   styleCell(sheet.getCell(rowNumber, 1), { bold: true, size: 14, align: "center" });
   rowNumber += 2;
 
-  const principles = [
-    "1. Đối tác có phụ lục Bạc · Vàng · Kim cương: phí/thù lao theo biểu của phụ lục áp dụng trong tháng, tính " +
-      "trên doanh số khách mua gói hội viên lần đầu (thực thu sau mã khuyến mại). Gia hạn, nâng cấp " +
-      "chưa có biểu theo phụ lục nên chưa tính.",
+  const staffPrinciple =
     "2. Doanh số của nhân viên bán hàng thuộc đối tác được cộng vào đối tác trong thời gian được ghi nhận. " +
-      "FireAnt chỉ chi cho người đứng tên hợp đồng; đối tác tự trả cho nhân viên của mình.",
-    "3. Đối tác chính sách Thường (chưa ký phụ lục hạng) và nhân viên kinh doanh: hoa hồng lũy tiến từng phần " +
-      `theo bậc trên doanh số gói hội viên; từ ${money(FLAT_RATE_THRESHOLD)} trở lên tổng thu nhập tháng = ` +
-      `${percent(FLAT_RATE)} doanh số. Bảng bậc ở cuối sheet.`,
+    "FireAnt chỉ chi cho người đứng tên hợp đồng; đối tác tự trả cho nhân viên của mình.";
+  const salaryPrinciple =
     `4. Lương cứng ${money(FIXED_SALARY.sales_employee)} của ` +
-      `${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()} trả qua bảng lương, không nằm trong giấy đề nghị này. ` +
-      "Số thanh toán = phí/thù lao theo phụ lục, hoặc hoa hồng theo bậc. Khóa học FireAnt Academy không tính ở giấy " +
-      "đề nghị này (đào tạo thanh toán ở phần Quản lý khóa học bên Admin).",
-  ];
+    `${PARTNER_TYPE_LABELS.sales_employee.toLowerCase()} trả qua bảng lương, không nằm trong giấy đề nghị này. ` +
+    "Số thanh toán = phí/thù lao của đối tác, hoặc hoa hồng theo bậc. Khóa học FireAnt Academy không tính ở giấy " +
+    "đề nghị này (đào tạo thanh toán ở phần Quản lý khóa học bên Admin).";
+  const principles = splitMonth
+    ? [
+        "1. Đối tác mọi hạng, kể cả chính sách Thường, tính theo loại đơn: (a) khách mua gói hội viên lần đầu — tài " +
+          "khoản chưa có gói hội viên trả phí nào ở mọi kênh FireAnt (gói dùng thử, 0 đồng không tính), hoặc gói trả phí " +
+          `gần nhất đã hết hạn đủ ${NEW_CUSTOMER_LAPSE_MONTHS} tháng tính tới ngày thanh toán — theo biểu của hạng: ` +
+          "Thường theo bậc lũy tiến, Bạc · Vàng · Kim cương theo biểu phụ lục; mốc doanh số chỉ xét doanh số khách mới. (b) Gia hạn, " +
+          `(c) nâng cấp và gói khác: ${percent(REPEAT_RATE)} cho mọi hạng, không cộng vào mốc. Doanh số là thực thu ` +
+          "sau mã khuyến mại; đơn nâng cấp tính phần chênh lệch khách đã trả.",
+        staffPrinciple,
+        "3. Nhân viên kinh doanh: hoa hồng lũy tiến từng phần theo bậc trên doanh số gói hội viên; từ " +
+          `${money(FLAT_RATE_THRESHOLD)} trở lên tổng thu nhập tháng = ${percent(FLAT_RATE)} doanh số. Bậc lũy tiến ` +
+          "của chính sách Thường (phần khách mới) và của nhân viên kinh doanh ở cuối sheet.",
+        salaryPrinciple,
+      ]
+    : [
+        "1. Đối tác có phụ lục Bạc · Vàng · Kim cương: phí/thù lao theo biểu của phụ lục áp dụng trong tháng, tính " +
+          "trên doanh số khách mua gói hội viên lần đầu (thực thu sau mã khuyến mại). Gia hạn, nâng cấp " +
+          "chưa có biểu theo phụ lục nên chưa tính.",
+        staffPrinciple,
+        "3. Đối tác chính sách Thường (chưa ký phụ lục hạng) và nhân viên kinh doanh: hoa hồng lũy tiến từng phần " +
+          `theo bậc trên doanh số gói hội viên; từ ${money(FLAT_RATE_THRESHOLD)} trở lên tổng thu nhập tháng = ` +
+          `${percent(FLAT_RATE)} doanh số. Bảng bậc ở cuối sheet.`,
+        salaryPrinciple,
+      ];
   for (const text of principles) {
     mergeAcross(rowNumber);
     sheet.getCell(rowNumber, 1).value = text;
     styleCell(sheet.getCell(rowNumber, 1), { wrap: true, align: "left" });
-    // Dòng dài phải đặt height vì Excel không tự fit ô đã merge.
-    sheet.getRow(rowNumber).height = 34;
+    // Dòng dài phải đặt height vì Excel không tự fit ô đã merge (~110 ký tự mỗi dòng).
+    sheet.getRow(rowNumber).height = Math.max(34, Math.ceil(text.length / 110) * 16);
     rowNumber += 1;
   }
   rowNumber += 1;
 
   const writeBandRow = (
     label: string,
-    from: number,
-    to: number,
+    from: number | null,
+    to: number | null,
     rate: number,
     amount: number,
     commission: number,
   ) => {
     const r = sheet.getRow(rowNumber);
     r.getCell(1).value = label;
-    r.getCell(2).value = from;
-    r.getCell(3).value = bandUpperLabel(to);
+    r.getCell(2).value = from ?? "";
+    r.getCell(3).value = to === null ? "" : bandUpperLabel(to);
     r.getCell(4).value = rate;
     r.getCell(5).value = amount;
     r.getCell(6).value = commission;
@@ -467,7 +505,85 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     rowNumber += 2;
   };
 
-  // Phí/thù lao theo phụ lục: các dòng đúng như calcTierPayout (dòng cuối nhận phần dư, Σ = thù lao).
+  // Các dòng biểu phụ lục trên `revenue`, đúng như calcTierPayout (dòng cuối nhận phần dư, Σ = commission).
+  const writeTierLines = (tier: PartnerTier, revenue: number, commission: number, prefix = "") => {
+    const payout = calcTierPayout(tier, revenue);
+    let allocated = 0;
+    payout.lines.forEach((line, lineIndex) => {
+      const isLast = lineIndex === payout.lines.length - 1;
+      const amount = isLast ? commission - allocated : line.amount;
+      allocated += amount;
+      if (line.kind === "base") {
+        writeBandRow(`${prefix}Mốc ${money(line.base)}`, 0, line.base, line.rate, line.base, amount);
+      } else if (line.kind === "excess") {
+        writeBandRow(
+          line.from > 0 ? `${prefix}Phần vượt ${money(line.from)}` : `${prefix}Toàn bộ doanh số`,
+          line.from,
+          line.from + line.base,
+          line.rate,
+          line.base,
+          amount,
+        );
+      } else {
+        writeBandRow(
+          `${prefix}Thưởng hạng ${TIER_LABELS[tier]} (trên tổng DS)`,
+          0,
+          line.base,
+          line.rate,
+          line.base,
+          amount,
+        );
+      }
+    });
+  };
+
+  // Các dòng bậc lũy tiến trên `revenue`. Từ 250tr: một dòng 18% (NVKD thêm dòng trừ lương cứng);
+  // dưới đó bậc cuối lấy phần dư để tổng các bậc khớp tuyệt đối với `commission`.
+  const writeBandLines = (revenue: number, partnerType: PartnerType, commission: number, prefix = "") => {
+    if (revenue >= FLAT_RATE_THRESHOLD && !hasPerformanceBonus(partnerType)) {
+      const flatTotal = Math.floor(revenue * FLAT_RATE);
+      writeBandRow(`${prefix}Từ ${money(FLAT_RATE_THRESHOLD)} trở lên`, 0, Infinity, FLAT_RATE, revenue, flatTotal);
+      if (FIXED_SALARY[partnerType] > 0) {
+        const r = sheet.getRow(rowNumber);
+        sheet.mergeCells(rowNumber, 1, rowNumber, 5);
+        r.getCell(1).value = "Trừ lương cứng (đã trả qua bảng lương)";
+        r.getCell(6).value = commission - flatTotal;
+        styleCell(r.getCell(1), { border: true, align: "left" });
+        styleCell(r.getCell(6), { border: true, numFmt: MONEY_FORMAT, align: "right" });
+        rowNumber += 1;
+      }
+      return;
+    }
+    const parts = explainCommission(revenue, partnerType);
+    let allocated = 0;
+    parts.forEach((part, partIndex) => {
+      const isLast = partIndex === parts.length - 1;
+      const amount = isLast ? commission - allocated : Math.floor(part.commission);
+      allocated += amount;
+      writeBandRow(`${prefix}Bậc ${partIndex + 1}`, part.from, part.to, part.rate, part.amount, amount);
+    });
+  };
+
+  // Dòng "Tổng …" = SUM cột thù lao của các dòng vừa ghi; trả về số dòng tổng.
+  const writeTotalRow = (label: string, firstLineRow: number, commission: number) => {
+    const totalRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(rowNumber, 1, rowNumber, 5);
+    totalRow.getCell(1).value = label;
+    totalRow.getCell(6).value = { formula: `SUM(F${firstLineRow}:F${rowNumber - 1})`, result: commission };
+    for (let col = 1; col <= EXPLANATION_LAST_COLUMN; col += 1) {
+      styleCell(totalRow.getCell(col), {
+        bold: true,
+        border: true,
+        numFmt: col === 6 ? MONEY_FORMAT : undefined,
+        align: col === 6 ? "right" : "left",
+      });
+    }
+    const totalRowNumber = rowNumber;
+    rowNumber += 1;
+    return totalRowNumber;
+  };
+
+  // Phí/thù lao theo phụ lục (trước SPLIT_POLICY_FROM): chỉ phần khách mua lần đầu.
   const writeTierSection = (row: PaymentRequestRow, index: number, tier: PartnerTier) => {
     mergeAcross(rowNumber);
     sheet.getCell(rowNumber, 1).value =
@@ -479,44 +595,9 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     writeHeaderRow(sheet, rowNumber, ["Khoản", "Từ", "Đến", "Tỷ lệ", "Doanh số tính", "Thù lao"]);
     rowNumber += 1;
 
-    const payout = calcTierPayout(tier, row.revenue);
     const firstLineRow = rowNumber;
-    let allocated = 0;
-    payout.lines.forEach((line, lineIndex) => {
-      const isLast = lineIndex === payout.lines.length - 1;
-      const amount = isLast ? row.commission - allocated : line.amount;
-      allocated += amount;
-      if (line.kind === "base") {
-        writeBandRow(`Mốc ${money(line.base)}`, 0, line.base, line.rate, line.base, amount);
-      } else if (line.kind === "excess") {
-        writeBandRow(
-          line.from > 0 ? `Phần vượt ${money(line.from)}` : "Toàn bộ doanh số",
-          line.from,
-          line.from + line.base,
-          line.rate,
-          line.base,
-          amount,
-        );
-      } else {
-        writeBandRow(`Thưởng hạng ${TIER_LABELS[tier]} (trên tổng DS)`, 0, line.base, line.rate, line.base, amount);
-      }
-    });
-    const lastLineRow = rowNumber - 1;
-
-    const totalRow = sheet.getRow(rowNumber);
-    sheet.mergeCells(rowNumber, 1, rowNumber, 5);
-    totalRow.getCell(1).value = "Tổng phí/thù lao theo phụ lục";
-    totalRow.getCell(6).value = { formula: `SUM(F${firstLineRow}:F${lastLineRow})`, result: row.commission };
-    for (let col = 1; col <= EXPLANATION_LAST_COLUMN; col += 1) {
-      styleCell(totalRow.getCell(col), {
-        bold: true,
-        border: true,
-        numFmt: col === 6 ? MONEY_FORMAT : undefined,
-        align: col === 6 ? "right" : "left",
-      });
-    }
-    const totalRowNumber = rowNumber;
-    rowNumber += 1;
+    writeTierLines(tier, row.revenue, row.commission);
+    const totalRowNumber = writeTotalRow("Tổng phí/thù lao theo phụ lục", firstLineRow, row.commission);
 
     const excluded = row.totalRevenue - row.revenue;
     if (excluded > 0) {
@@ -551,39 +632,7 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
 
     const hasBonus = hasPerformanceBonus(row.partnerType);
     const firstBandRow = rowNumber;
-    if (row.revenue >= FLAT_RATE_THRESHOLD && !hasBonus) {
-      // Đạt ngưỡng: không chia bậc, toàn bộ doanh số hưởng 18%; NVKD trừ lương cứng
-      // (trả qua bảng lương) để ra hoa hồng thực nhận.
-      const flatTotal = Math.floor(row.revenue * FLAT_RATE);
-      writeBandRow(
-        `Từ ${money(FLAT_RATE_THRESHOLD)} trở lên`,
-        0,
-        Infinity,
-        FLAT_RATE,
-        row.revenue,
-        flatTotal,
-      );
-      const baseSalary = FIXED_SALARY[row.partnerType];
-      if (baseSalary > 0) {
-        const r = sheet.getRow(rowNumber);
-        sheet.mergeCells(rowNumber, 1, rowNumber, 5);
-        r.getCell(1).value = "Trừ lương cứng (đã trả qua bảng lương)";
-        r.getCell(6).value = row.commission - flatTotal;
-        styleCell(r.getCell(1), { border: true, align: "left" });
-        styleCell(r.getCell(6), { border: true, numFmt: MONEY_FORMAT, align: "right" });
-        rowNumber += 1;
-      }
-    } else {
-      const parts = explainCommission(row.revenue, row.partnerType);
-      // Bậc cuối lấy phần dư để tổng các bậc khớp tuyệt đối với hoa hồng đã tính.
-      let allocated = 0;
-      parts.forEach((part, partIndex) => {
-        const isLast = partIndex === parts.length - 1;
-        const commission = isLast ? row.commission - allocated : Math.floor(part.commission);
-        allocated += commission;
-        writeBandRow(`Bậc ${partIndex + 1}`, part.from, part.to, part.rate, part.amount, commission);
-      });
-    }
+    writeBandLines(row.revenue, row.partnerType, row.commission);
     const lastBandRow = rowNumber - 1;
     const hasBandRows = lastBandRow >= firstBandRow;
 
@@ -626,14 +675,42 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     );
   };
 
+  // Từ SPLIT_POLICY_FROM: khách mới theo biểu của hạng + gia hạn, nâng cấp theo REPEAT_RATE.
+  const writeSplitSection = (row: PaymentRequestRow, index: number, split: SplitRemuneration) => {
+    mergeAcross(rowNumber);
+    sheet.getCell(rowNumber, 1).value =
+      `${index + 1}. ${partnerLabel(row)} — ` +
+      `${row.tier ? `Phụ lục ${TIER_LABELS[row.tier]} (${TIER_APPENDIX[row.tier]})` : "Chính sách Thường"} — ` +
+      `DS khách mới ${money(split.newRevenue)}; gia hạn, nâng cấp ${money(split.repeatRevenue)}`;
+    styleCell(sheet.getCell(rowNumber, 1), { bold: true, align: "left", fill: true });
+    rowNumber += 1;
+
+    writeHeaderRow(sheet, rowNumber, ["Khoản", "Từ", "Đến", "Tỷ lệ", "Doanh số tính", "Thù lao"]);
+    rowNumber += 1;
+
+    const firstLineRow = rowNumber;
+    if (split.newRevenue > 0) {
+      if (row.tier) writeTierLines(row.tier, split.newRevenue, split.newCommission, "Khách mới · ");
+      else writeBandLines(split.newRevenue, "collaborator", split.newCommission, "Khách mới · ");
+    }
+    if (split.repeatRevenue > 0) {
+      writeBandRow("Gia hạn, nâng cấp", null, null, REPEAT_RATE, split.repeatRevenue, split.repeatCommission);
+    }
+    const totalRowNumber = writeTotalRow("Tổng phí/thù lao", firstLineRow, row.commission);
+    writePayRow("Thanh toán = Phí/thù lao", `F${totalRowNumber}`, row.commission + row.bonus);
+  };
+
   rows.forEach((row, index) => {
-    if (row.policy === "tier" && row.tier) writeTierSection(row, index, row.tier);
+    if (row.policy === "split" && row.split) writeSplitSection(row, index, row.split);
+    else if (row.policy === "tier" && row.tier) writeTierSection(row, index, row.tier);
     else writeLegacySection(row, index);
   });
 
-  if (tierMonth) {
+  if (rows.some((row) => row.policy !== "legacy" && row.tier)) {
     mergeAcross(rowNumber);
-    sheet.getCell(rowNumber, 1).value = "BIỂU PHÍ/THÙ LAO THEO PHỤ LỤC (theo phụ lục hợp đồng dịch vụ)";
+    sheet.getCell(rowNumber, 1).value = splitMonth
+      ? "BIỂU PHÍ/THÙ LAO THEO PHỤ LỤC — PHẦN KHÁCH MUA LẦN ĐẦU (theo phụ lục hợp đồng dịch vụ)"
+      : "BIỂU PHÍ/THÙ LAO THEO PHỤ LỤC (theo phụ lục hợp đồng dịch vụ)";
     styleCell(sheet.getCell(rowNumber, 1), { bold: true, align: "left" });
     rowNumber += 1;
     writeHeaderRow(sheet, rowNumber, [
@@ -670,14 +747,16 @@ function buildExplanationSheet(workbook: ExcelJS.Workbook, input: PaymentRequest
     rowNumber += 2;
   }
 
-  // Bảng bậc chỉ cho các loại có người tính theo bậc trong giấy đề nghị.
-  const legacyRows = rows.filter((row) => row.policy === "legacy");
+  // Bảng bậc chỉ cho các loại có người tính theo bậc trong giấy đề nghị (từ SPLIT_POLICY_FROM gồm phần khách
+  // mới của đối tác chính sách Thường).
   const bandTypes = (["collaborator", "sales_employee"] as PartnerType[]).filter((type) =>
-    legacyRows.some((row) => row.partnerType === type),
+    rows.some((row) => row.partnerType === type && (row.policy === "legacy" || (row.policy === "split" && !row.tier))),
   );
   if (bandTypes.length === 0) return;
   const bandTypeLabel = (type: PartnerType) =>
-    type === "collaborator" ? `${PARTNER_TYPE_LABELS.collaborator} (chính sách Thường)` : PARTNER_TYPE_LABELS[type];
+    type === "collaborator"
+      ? `${PARTNER_TYPE_LABELS.collaborator} (chính sách Thường${splitMonth ? ", phần khách mới" : ""})`
+      : PARTNER_TYPE_LABELS[type];
 
   mergeAcross(rowNumber);
   sheet.getCell(rowNumber, 1).value = "BẢNG BẬC HOA HỒNG (áp dụng lũy tiến từng phần)";
@@ -815,11 +894,16 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
     `BẢNG KÊ ĐƠN HÀNG ĐÃ THANH TOÁN TỪ ${dmy(start)} ĐẾN ${dmy(lastDay)}`;
   styleCell(sheet.getCell(1, 1), { bold: true, size: 14, align: "center" });
 
+  const splitMonth = usesSplitPolicy(month);
   sheet.mergeCells(2, 1, 2, ORDER_LAST_COLUMN);
   sheet.getCell(2, 1).value =
     "Mỗi coupon tính một đơn đã thanh toán mới nhất, quy về tháng theo ngày thanh toán. " +
     "Doanh thu là số thực thu của đơn (đơn nâng cấp chỉ tính phần chênh lệch khách đã trả). " +
-    `"${ORDER_KIND_LABELS.new}" là đơn gói hội viên đầu tiên của tài khoản — căn cứ tính phí/thù lao theo phụ lục. ` +
+    (splitMonth
+      ? `"${ORDER_KIND_LABELS.new}": tài khoản chưa có gói hội viên trả phí nào ở mọi kênh FireAnt, hoặc gói trả phí ` +
+        `gần nhất đã hết hạn đủ ${NEW_CUSTOMER_LAPSE_MONTHS} tháng — tính theo biểu của hạng; ` +
+        `"${ORDER_KIND_LABELS.renewal}", "${ORDER_KIND_LABELS.upgrade}" và gói khác tính ${percent(REPEAT_RATE)}. `
+      : `"${ORDER_KIND_LABELS.new}" là đơn gói hội viên đầu tiên của tài khoản — căn cứ tính phí/thù lao theo phụ lục. `) +
     "Đơn do nhân viên của đối tác bán được tính cho đối tác trong thời gian nhân viên được ghi nhận.";
   styleCell(sheet.getCell(2, 1), { italic: true, size: 11, wrap: true, align: "left" });
   sheet.getRow(2).height = 58;
@@ -898,24 +982,14 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
     subtotalRows.push(rowNumber);
     rowNumber += 1;
 
-    // Đối tác có phụ lục: tách riêng phần khách mới — đúng cột doanh số trên giấy đề nghị.
-    const newRevenue = row.orders.filter((o) => o.kind === "new").reduce((sum, o) => sum + o.amount, 0);
-    if (row.policy === "tier") {
-      const newRow = sheet.getRow(rowNumber);
+    const writeShareRow = (label: string, value: ExcelJS.CellValue) => {
+      const shareRow = sheet.getRow(rowNumber);
       sheet.mergeCells(rowNumber, 1, rowNumber, ORDER_LABEL_SPAN);
-      newRow.getCell(1).value = `Trong đó ${ORDER_KIND_LABELS.new.toLowerCase()} (căn cứ phí/thù lao theo phụ lục)`;
-      newRow.getCell(ORDER_MONEY_COLUMN).value =
-        row.orders.length > 0
-          ? {
-              formula:
-                `SUMIF(${ORDER_KIND_LETTER}${firstOrderRow}:${ORDER_KIND_LETTER}${lastOrderRow},` +
-                `"${ORDER_KIND_LABELS.new}",${ORDER_MONEY_LETTER}${firstOrderRow}:${ORDER_MONEY_LETTER}${lastOrderRow})`,
-              result: newRevenue,
-            }
-          : 0;
+      shareRow.getCell(1).value = label;
+      shareRow.getCell(ORDER_MONEY_COLUMN).value = value;
       for (let col = 1; col <= ORDER_LAST_COLUMN; col += 1) {
         const isMoney = col === ORDER_MONEY_COLUMN;
-        styleCell(newRow.getCell(col), {
+        styleCell(shareRow.getCell(col), {
           italic: true,
           border: true,
           numFmt: isMoney ? MONEY_FORMAT : undefined,
@@ -923,6 +997,31 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, input: PaymentRequestInput
         });
       }
       rowNumber += 1;
+    };
+
+    // Đối tác có phụ lục / tính theo loại đơn: tách phần khách mới (và phần gia hạn, nâng cấp).
+    const newRevenue = row.orders.filter((o) => o.kind === "new").reduce((sum, o) => sum + o.amount, 0);
+    if (row.policy === "tier" || row.policy === "split") {
+      const newRowNumber = rowNumber;
+      writeShareRow(
+        `Trong đó ${ORDER_KIND_LABELS.new.toLowerCase()} (${
+          row.policy === "split" ? "theo biểu của hạng" : "căn cứ phí/thù lao theo phụ lục"
+        })`,
+        row.orders.length > 0
+          ? {
+              formula:
+                `SUMIF(${ORDER_KIND_LETTER}${firstOrderRow}:${ORDER_KIND_LETTER}${lastOrderRow},` +
+                `"${ORDER_KIND_LABELS.new}",${ORDER_MONEY_LETTER}${firstOrderRow}:${ORDER_MONEY_LETTER}${lastOrderRow})`,
+              result: newRevenue,
+            }
+          : 0,
+      );
+      if (row.policy === "split") {
+        writeShareRow(`Trong đó gia hạn, nâng cấp và gói khác (${percent(REPEAT_RATE)})`, {
+          formula: `${ORDER_MONEY_LETTER}${newRowNumber - 1}-${ORDER_MONEY_LETTER}${newRowNumber}`,
+          result: orderRevenue - newRevenue,
+        });
+      }
     }
 
     // Cảnh báo khi bảng kê đơn không khớp doanh số trên giấy đề nghị.

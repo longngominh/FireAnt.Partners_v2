@@ -17,6 +17,7 @@ import {
   CONTRACT_TIERS,
   contractTierScheme,
   isContractTier,
+  usesSplitPolicy,
   type ContractTier,
 } from "@/lib/commission";
 import { payableAmount } from "@/lib/earnings/explain";
@@ -317,7 +318,9 @@ export default async function AdminPayoutsPage({ searchParams }: { searchParams:
           value={formatVND(live.base)}
           hint={
             live.revenue > live.base
-              ? `Trong tổng ${formatVND(live.revenue)} · gia hạn, nâng cấp của phụ lục chưa tính; khóa học thanh toán riêng`
+              ? `Trong tổng ${formatVND(live.revenue)} · ${
+                  usesSplitPolicy(month) ? "" : "gia hạn, nâng cấp của phụ lục chưa tính; "
+                }khóa học thanh toán riêng`
               : `Tổng doanh thu ${formatVND(live.revenue)}`
           }
           trend={trendOf((s) => s.base)}
